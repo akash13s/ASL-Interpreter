@@ -1,0 +1,20 @@
+# Python and PyTorch-specific ignores
+__pycache__
+*.py[cod]
+*$py.class
+.DS_Store
+*.egg-info
+.pytest_cache
+.ipynb_checkpoints
+
+# PyTorch-specific ignores
+*.pt
+*.pth
+*.bin
+*.t7
+*.pkl
+checkpoints
+runs
+
+.idea
+.vscode
