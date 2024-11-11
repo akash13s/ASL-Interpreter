@@ -10,7 +10,7 @@ class VideoDataset(Dataset):
 
     def __init__(self, video_dir, csv_file, transform=None, fps=30):
         self.video_dir = video_dir
-        self.annotations = pd.read_csv(csv_file, sep='\t')
+        self.annotations = pd.read_csv(csv_file, sep=',')
         self.transform = transform
         self.fps = fps
         self.max_frames = self.calculate_max_frames()
