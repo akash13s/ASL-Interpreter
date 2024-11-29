@@ -1,8 +1,9 @@
-import numpy as np
-import pandas as pd
-import av
 import bisect
 import os
+
+import av
+import numpy as np
+import pandas as pd
 from torch.utils.data import Dataset
 
 
@@ -33,13 +34,16 @@ def read_video_pyav(video_path, start, end):
             break
         if i >= start_id and i in indices:
             frames.append(frame)
-    assert len(frames) == 2, f"Got {len(frames)} frames but should be 2. Check the indices: {indices};, start_id: {start_id}, end_id: {end_id}. Len of video is {len(av_timestamps)} frames."
+    assert len(
+        frames) == 2, f"Got {len(frames)} frames but should be 2. Check the indices: {indices};, start_id: {start_id}, end_id: {end_id}. Len of video is {len(av_timestamps)} frames."
     return np.stack([x.to_ndarray(format="rgb24") for x in frames])
+
 
 class VideoLlavaDataset(Dataset):
     """
     PyTorch Dataset for VideoLlavaDataset.
     """
+
     def __init__(self, video_path: str, csv_file: str, num_frames: int = 8):
         super().__init__()
         self.annotations = pd.read_csv(csv_file)
@@ -51,13 +55,13 @@ class VideoLlavaDataset(Dataset):
 
     def __getitem__(self, idx: int):
         sample = self.annotations.iloc[idx]
-        
+
         # Lazy load video clip here
         video_id = str(sample['SENTENCE_NAME']).strip()
         sentence = str(sample['SENTENCE']).strip()
-        
+
         video_path = os.path.join(self.video_path, f'{video_id}.mp4')
-        
+
         clip = read_video_pyav(video_path, 0, 1e+10)
         answer = sentence
         tmp_prompt = "<video>\n Translate the American Sign Language (ASL) demonstrated in the video to English text, where each frame shows ASL signs used at different time points chronologically."

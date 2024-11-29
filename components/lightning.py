@@ -1,6 +1,8 @@
-import lightning as L
 import torch
 from torch.utils.data import DataLoader
+
+import lightning as L
+
 
 class VideoLlavaModelPLModule(L.LightningModule):
     def __init__(self, config, processor, model, train_dataset, val_dataset, train_collate_fn, val_collate_fn):
@@ -17,7 +19,6 @@ class VideoLlavaModelPLModule(L.LightningModule):
         self.batch_size = config.get("batch_size")
 
     def training_step(self, batch, batch_idx):
-
         input_ids, attention_mask, pixel_values_videos, labels = batch
 
         outputs = self.model(
@@ -33,7 +34,6 @@ class VideoLlavaModelPLModule(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx, dataset_idx=0):
-
         input_ids, attention_mask, pixel_values_videos, answers = batch
 
         # autoregressively generate token IDs
@@ -61,7 +61,9 @@ class VideoLlavaModelPLModule(L.LightningModule):
         return optimizer
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, collate_fn=self.train_collate_fn, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
+        return DataLoader(self.train_dataset, collate_fn=self.train_collate_fn, batch_size=self.batch_size,
+                          shuffle=True, num_workers=self.num_workers)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, collate_fn=self.val_collate_fn, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+        return DataLoader(self.val_dataset, collate_fn=self.val_collate_fn, batch_size=self.batch_size, shuffle=False,
+                          num_workers=self.num_workers)
