@@ -44,7 +44,7 @@ class Collator(object):
         true_answers = []
         texts, videos, true_answers = list(zip(*examples))
         # Get text without answers, so the model has to generate the answers itself during eval
-        texts = [text[:-2] for text in texts]
+        texts = [text.split("Answer: ")[0] for text in texts]
         batch = self.processor(
             text=texts,
             videos=videos,

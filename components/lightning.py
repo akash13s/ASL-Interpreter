@@ -47,6 +47,8 @@ class VideoLlavaModelPLModule(L.LightningModule):
         # turn them back into text, chopping of the prompt
         predictions = self.processor.batch_decode(generated_ids[:, input_ids.size(1):], skip_special_tokens=True)
 
+        answers = list(answers)
+
         correct = 0
         for pred, answer in zip(predictions, answers):
             correct += (pred.strip().lower() == answer.lower())
