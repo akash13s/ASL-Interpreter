@@ -15,6 +15,7 @@ __pycache__
 *.pkl
 checkpoints
 runs
+outputs
 
 .idea
 .vscode
