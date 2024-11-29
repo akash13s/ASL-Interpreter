@@ -9,7 +9,7 @@ class Collator(object):
         self.is_val = is_val
 
     def __call__(self, examples):
-        self.val_collate(examples) if self.is_val else self.train_collate(examples)
+        return self.val_collate(examples) if self.is_val else self.train_collate(examples)
 
     def train_collate(self, examples):
         videos = []
