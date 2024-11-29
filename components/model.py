@@ -1,11 +1,12 @@
-import torch
-from peft import LoraConfig, prepare_model_for_kbit_training, get_peft_model
 from transformers import BitsAndBytesConfig, VideoLlavaForConditionalGeneration
+from peft import LoraConfig, prepare_model_for_kbit_training, get_peft_model
+import torch
 
 # Default Model Params
 DEVICE = 0
 
 MODEL_ID = "LanguageBind/Video-LLaVA-7B-hf"
+CACHE_DIR = "./cache"
 
 USE_QLORA = True
 USE_8BIT = False  # Change to use 8bit configuration with qlora, otherwise, default is 4bit
@@ -15,10 +16,11 @@ LORA_R = 64
 LORA_ALPHA = 128
 
 
-def get_base_model(model_id, bnb_config, device):
+def get_base_model(model_id, bnb_config, cache_dir, device):
     return VideoLlavaForConditionalGeneration.from_pretrained(
         model_id,
         torch_dtype=torch.float16,
+        cache_dir=cache_dir,
         quantization_config=bnb_config,
         device_map={"": device},
     )
@@ -82,15 +84,16 @@ def get_lora_config(model, lora_r, lora_alpha):
 
 
 def get_video_llava_peft_model(
-        model_id: str = MODEL_ID,
-        use_qlora: bool = USE_QLORA,
-        use_8bit: bool = USE_8BIT,
-        lora_r: int = LORA_R,
-        lora_alpha: int = LORA_ALPHA,
-        device: int = DEVICE
+    model_id: str = MODEL_ID,
+    use_qlora: bool = USE_QLORA,
+    use_8bit: bool = USE_8BIT,
+    lora_r: int = LORA_R,
+    lora_alpha: int = LORA_ALPHA,
+    cache_dir: str = CACHE_DIR,
+    device: int = DEVICE
 ):
     bnb_config = get_bnb_config(use_qlora, use_8bit)
-    model = get_base_model(model_id, bnb_config, device)
+    model = get_base_model(model_id, bnb_config, cache_dir, device)
     lora_config = get_lora_config(model, lora_r, lora_alpha)
 
     model = prepare_model_for_kbit_training(model)
