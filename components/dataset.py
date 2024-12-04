@@ -44,9 +44,16 @@ class VideoLlavaDataset(Dataset):
     PyTorch Dataset for VideoLlavaDataset.
     """
 
-    def __init__(self, video_path: str, csv_file: str, num_frames: int = 8):
+    def __init__(self, video_path: str, csv_file: str, num_frames: int = 8, mode: str = "train"):
         super().__init__()
-        self.annotations = pd.read_csv(csv_file)
+        df = pd.read_csv(csv_file)
+        
+        self.annotations = df
+        if len(self.annotations) > 10000 and mode == "train":
+            self.annotations = df.head(10000)
+        if len(self.annotations) > 10000 and mode == "val":
+            self.annotations = df.iloc[10000:10500]
+        
         self.num_frames = num_frames
         self.video_path = video_path
 
