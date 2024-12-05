@@ -27,7 +27,7 @@ MODEL_NAME = MODEL_ID.split("/")[-1]
 VIDEO_DIR = "/scratch/as18464/raw_videos"
 CSV_FILE = "valid_clips.csv"
 CACHE_DIR = "cache/"
-DATASET_SIZE = 10000
+DATASET_SIZE = 5000
 
 # LoRA hyperparameters
 LORA_R = 8
@@ -42,6 +42,12 @@ LORA_TARGET_MODULES = [
     "up_proj",
     "down_proj",
 ]
+
+# model constants
+BATCH_SIZE = 4
+MAX_LENGTH = 350
+LEARNING_RATE = 1e-4
+WEIGHT_DECAY = 0.01
 
 def read_video_pyav(container, indices):
     '''
@@ -143,10 +149,6 @@ class VideoDataset(Dataset):
         
         return prompt, frame_tensor
 
-# model constants
-BATCH_SIZE = 8
-MAX_LENGTH = 350
-
 def train_epoch(model, train_loader, optimizer, processor, device, epoch):
     model.train()
     total_loss = 0
@@ -238,7 +240,7 @@ def create_data_loader(video_dir, csv_file, batch_size, num_frames=8):
         dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=2,  # Set to 0 for debugging
+        num_workers=0,  # Set to 0 for debugging
         pin_memory=False
     )
     
@@ -249,7 +251,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 train_loader = create_data_loader(
     video_dir=VIDEO_DIR,
     csv_file=CSV_FILE,
-    batch_size=BATCH_SIZE * torch.cuda.device_count(),
+    batch_size=BATCH_SIZE,
     num_frames=16
 )
 
@@ -282,17 +284,28 @@ peft_config = LoraConfig(
 p_model = get_peft_model(p_model, peft_config)
 p_model.print_trainable_parameters()
 
-p_model = p_model.to(device)
+def set_trainable_params(model):
+    # First make sure all parameters are not trainable
+    for param in model.parameters():
+        param.requires_grad = False
+    
+    # Then enable training only for the LoRA parameters
+    for name, param in model.named_parameters():
+        if "lora_" in name:  # This targets only the LoRA layers
+            param.requires_grad = True
 
+set_trainable_params(p_model)
+
+p_model = p_model.cuda()
 if torch.cuda.device_count() > 1:
     print(f"Using {torch.cuda.device_count()} GPUs!")
     p_model = DataParallel(p_model)
 
-optimizer = torch.optim.AdamW(p_model.parameters(), lr=1e-3)
+optimizer = torch.optim.AdamW(p_model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 
 processor = AutoProcessor.from_pretrained(MODEL_ID)
 processor.tokenizer.padding_side = "right"
+processor.image_processor.do_rescale = False
 
 for i in range(4):
     train_epoch(p_model, train_loader, optimizer, processor, device, i)
-

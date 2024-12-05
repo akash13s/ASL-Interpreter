@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=1            # 1 CPU per task for 1 GPU
 #SBATCH --time=24:00:00
 #SBATCH --mem=64GB
-#SBATCH --gres=gpu:1                 # Request 1 GPU per node
+#SBATCH --gres=gpu:v100:1                 # Request 1 GPU per node
 #SBATCH --job-name=video-llava-1-gpu
 #SBATCH --output=video-llava-1-gpu.out
 #SBATCH --nice=0
