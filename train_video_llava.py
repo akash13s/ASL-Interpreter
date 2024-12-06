@@ -13,7 +13,10 @@ import os
 from typing import Tuple, Any
 import pandas as pd
 from torch.cuda.amp import autocast
-from torch.nn.parallel import DataParallel
+# from torch.nn.parallel import DataParallel
+
+from accelerate import Accelerator
+from accelerate import DistributedDataParallelKwargs
 
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
@@ -27,7 +30,7 @@ MODEL_NAME = MODEL_ID.split("/")[-1]
 VIDEO_DIR = "/scratch/as18464/raw_videos"
 CSV_FILE = "valid_clips.csv"
 CACHE_DIR = "cache/"
-DATASET_SIZE = 5000
+DATASET_SIZE = 1000
 
 # LoRA hyperparameters
 LORA_R = 8
@@ -45,7 +48,7 @@ LORA_TARGET_MODULES = [
 
 # model constants
 BATCH_SIZE = 4
-MAX_LENGTH = 350
+MAX_LENGTH = 3500
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 0.01
 
@@ -139,7 +142,7 @@ class VideoDataset(Dataset):
         
         frames = get_frames(video_path, self.num_frames)
 
-        tmp_prompt = "Translate the American Sign Language (ASL) demonstrated in the video to English text, where each frame shows ASL signs used at different time points chronologically."
+        tmp_prompt = "Analyze the American Sign Language (ASL) signs in this video and translate them into clear, natural English. Consider the sequence of signs as a complete message, and provide an accurate translation that captures the full meaning. Respond with only the English translation, without descriptions of the signs themselves."
         
         prompt = f"USER: <video> {tmp_prompt}\nASSISTANT: Answer: {sentence}"
 
@@ -149,7 +152,7 @@ class VideoDataset(Dataset):
         
         return prompt, frame_tensor
 
-def train_epoch(model, train_loader, optimizer, processor, device, epoch):
+def train_epoch(model, train_loader, optimizer, processor, accelerator, epoch):
     model.train()
     total_loss = 0
     progress_bar = tqdm(train_loader, desc=f'Training Epoch {epoch}')
@@ -158,7 +161,7 @@ def train_epoch(model, train_loader, optimizer, processor, device, epoch):
         vids = list(torch.unbind(videos, dim=0))
         image_lists = []
         for batch in vids:
-            images = [img.permute(1, 2, 0).numpy() for img in batch]
+            images = [img.cpu().permute(1, 2, 0).numpy() for img in batch]
             image_lists.append(images)
         try:
             batch = processor(
@@ -174,10 +177,10 @@ def train_epoch(model, train_loader, optimizer, processor, device, epoch):
             labels[labels == processor.tokenizer.pad_token_id] = -100
             batch["labels"] = labels
             
-            input_ids = batch["input_ids"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            pixel_values_videos = batch["pixel_values_videos"].to(device)
-            labels = batch["labels"].to(device)
+            input_ids = accelerator.prepare(batch["input_ids"])
+            attention_mask = accelerator.prepare(batch["attention_mask"])
+            pixel_values_videos = accelerator.prepare(batch["pixel_values_videos"])
+            labels = accelerator.prepare(batch["labels"])
             
             optimizer.zero_grad()
             
@@ -189,10 +192,8 @@ def train_epoch(model, train_loader, optimizer, processor, device, epoch):
             )
             loss = outputs.loss
 
-            if isinstance(model, DataParallel):
-                loss = loss.mean()
+            accelerator.backward(loss)
             
-            loss.backward()
             # torch.nn.utils.clip_gradnorm(model.parameters(), 1.0)
             optimizer.step()
 
@@ -205,26 +206,33 @@ def train_epoch(model, train_loader, optimizer, processor, device, epoch):
                 'avg_loss': f'{avg_loss:.4f}'
             })
 
-            # Print detailed loss information for each iteration
-            print(f'Epoch {epoch} | Batch {batch_idx}/{len(train_loader)} | '
-                  f'Loss: {current_loss:.4f} | Avg Loss: {avg_loss:.4f}')
+            if accelerator.is_main_process:
+                print(f'Epoch {epoch} | Batch {batch_idx}/{len(train_loader)} | '
+                      f'Loss: {current_loss:.4f} | Avg Loss: {avg_loss:.4f}')
             
         except Exception as e:
             raise e
 
-    # Save checkpoint after every epoch
-    checkpoint_path = f"output/checkpoint_epoch_{epoch}"
-    os.makedirs("output", exist_ok=True)  # Ensure output directory exists
+    if accelerator.is_main_process:
+        checkpoint_path = f"output/checkpoint_epoch_{epoch}"
+        os.makedirs("output", exist_ok=True)
+        
+        unwrapped_model = accelerator.unwrap_model(model)
+        
+        if hasattr(unwrapped_model, 'get_peft_state_dict'):
+            state_dict = unwrapped_model.get_peft_state_dict()
+        else:
+            state_dict = unwrapped_model.state_dict()
     
-    checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': model.module.state_dict() if isinstance(model, DataParallel) else model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'loss': avg_loss
-    }
-    
-    print(f"Saving checkpoint for epoch {epoch} with average loss: {avg_loss:.4f}")
-    torch.save(checkpoint, checkpoint_path)
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': state_dict,
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': loss
+        }
+        
+        print(f"Saving checkpoint for epoch {epoch} with average loss: {avg_loss:.4f}")
+        torch.save(checkpoint, checkpoint_path)
     
     return total_loss / len(train_loader)
 
@@ -296,16 +304,20 @@ def set_trainable_params(model):
 
 set_trainable_params(p_model)
 
-p_model = p_model.cuda()
-if torch.cuda.device_count() > 1:
-    print(f"Using {torch.cuda.device_count()} GPUs!")
-    p_model = DataParallel(p_model)
-
 optimizer = torch.optim.AdamW(p_model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+
+# initialize the accelerator with the right kwargs
+ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
+
+# Prepare your model, optimizer, and dataloader with accelerator
+p_model, optimizer, train_loader = accelerator.prepare(
+    p_model, optimizer, train_loader
+)
 
 processor = AutoProcessor.from_pretrained(MODEL_ID)
 processor.tokenizer.padding_side = "right"
 processor.image_processor.do_rescale = False
 
-for i in range(4):
-    train_epoch(p_model, train_loader, optimizer, processor, device, i)
+for i in range(5):
+    train_epoch(p_model, train_loader, optimizer, processor, accelerator, i)
