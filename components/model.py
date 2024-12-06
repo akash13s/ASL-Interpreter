@@ -1,5 +1,5 @@
 import torch
-from peft import LoraConfig, prepare_model_for_kbit_training, get_peft_model
+from peft import LoraConfig, prepare_model_for_kbit_training, get_peft_model, TaskType
 from transformers import BitsAndBytesConfig, VideoLlavaForConditionalGeneration
 
 # Default Model Params
@@ -80,7 +80,19 @@ def get_lora_config(model, lora_r, lora_alpha):
         lora_dropout=0.1,
         target_modules=find_all_linear_names(model),
         init_lora_weights="gaussian",
+        task_type=TaskType.CAUSAL_LM
     )
+
+
+def set_trainable_params(model):
+    # First make sure all parameters are not trainable
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # Then enable training only for the LoRA parameters
+    for name, param in model.named_parameters():
+        if "lora_" in name:  # This targets only the LoRA layers
+            param.requires_grad = True
 
 
 def get_video_llava_peft_model(
@@ -100,4 +112,5 @@ def get_video_llava_peft_model(
     model.gradient_checkpointing_enable()
 
     peft_model = get_peft_model(model, lora_config)
+    set_trainable_params(peft_model)
     return peft_model
