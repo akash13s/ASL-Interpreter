@@ -1,6 +1,6 @@
-from transformers import BitsAndBytesConfig, VideoLlavaForConditionalGeneration
-from peft import LoraConfig, prepare_model_for_kbit_training, get_peft_model
 import torch
+from peft import LoraConfig, prepare_model_for_kbit_training, get_peft_model
+from transformers import BitsAndBytesConfig, VideoLlavaForConditionalGeneration
 
 # Default Model Params
 DEVICE = 0
@@ -84,13 +84,13 @@ def get_lora_config(model, lora_r, lora_alpha):
 
 
 def get_video_llava_peft_model(
-    model_id: str = MODEL_ID,
-    use_qlora: bool = USE_QLORA,
-    use_8bit: bool = USE_8BIT,
-    lora_r: int = LORA_R,
-    lora_alpha: int = LORA_ALPHA,
-    cache_dir: str = CACHE_DIR,
-    device: int = DEVICE
+        model_id: str = MODEL_ID,
+        use_qlora: bool = USE_QLORA,
+        use_8bit: bool = USE_8BIT,
+        lora_r: int = LORA_R,
+        lora_alpha: int = LORA_ALPHA,
+        cache_dir: str = CACHE_DIR,
+        device: int = DEVICE
 ):
     bnb_config = get_bnb_config(use_qlora, use_8bit)
     model = get_base_model(model_id, bnb_config, cache_dir, device)

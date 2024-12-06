@@ -14,9 +14,10 @@ class VideoLlavaModelPLModule(L.LightningModule):
         self.train_collate_fn = train_collate_fn
         self.val_dataset = val_dataset
         self.val_collate_fn = val_collate_fn
-        self.num_workers = config.get("num_workers")
-        self.max_length = config.get("max_new_tokens")
-        self.batch_size = config.get("batch_size")
+        self.num_workers = config.get("num_workers", 0)
+        self.max_length = config.get("max_new_tokens", 3500)
+        self.batch_size = config.get("batch_size", 4)
+        self.pin_memory = config.get("pin_memory", False)
 
     def training_step(self, batch, batch_idx):
         input_ids, attention_mask, pixel_values_videos, labels = batch
@@ -63,9 +64,21 @@ class VideoLlavaModelPLModule(L.LightningModule):
         return optimizer
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, collate_fn=self.train_collate_fn, batch_size=self.batch_size,
-                          shuffle=True, num_workers=self.num_workers)
+        return DataLoader(
+            self.train_dataset,
+            collate_fn=self.train_collate_fn,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory
+        )
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, collate_fn=self.val_collate_fn, batch_size=self.batch_size, shuffle=False,
-                          num_workers=self.num_workers)
+        return DataLoader(
+            self.val_dataset,
+            collate_fn=self.val_collate_fn,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory
+        )
