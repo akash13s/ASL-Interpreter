@@ -292,6 +292,7 @@ if torch.cuda.device_count() > 1:
 optimizer = torch.optim.AdamW(p_model.parameters(), lr=1e-3)
 processor = AutoProcessor.from_pretrained(MODEL_ID)
 processor.tokenizer.padding_side = "right"
+processor.image_processor.do_rescale = False
 
 for i in range(4):
     train_epoch(p_model, train_loader, optimizer, processor, device, i)
