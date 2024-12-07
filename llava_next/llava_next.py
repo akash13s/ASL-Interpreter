@@ -1,10 +1,10 @@
-import av
+mport av
 import bisect
 import numpy as np
 import torch
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
-from transformers import AutoProcessor, BitsAndBytesConfig, LlavaNextVideoForConditionalGeneration
+from transformers import BitsAndBytesConfig, LlavaNextVideoForConditionalGeneration, LlavaNextVideoProcessor
 from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
 import json
 import torch.nn.utils.prune as prune
@@ -44,10 +44,23 @@ LORA_TARGET_MODULES = [
 ]
 
 # model constants
-BATCH_SIZE = 8
+BATCH_SIZE = 1
 MAX_LENGTH = 350
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+quantization_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16
+)
+
+model = LlavaNextVideoForConditionalGeneration.from_pretrained(
+    MODEL_ID,
+    torch_dtype=torch.float16,
+    device_map="auto",
+    cache_dir=CACHE_DIR,
+    quantization_config=quantization_config
+)
 
 def read_video_pyav(container, indices):
     '''
@@ -56,7 +69,7 @@ def read_video_pyav(container, indices):
         container (`av.container.input.InputContainer`): PyAV container.
         indices (`List[int]`): List of frame indices to decode.
     Returns:
-        result (np.ndarray): np array of decoded frames of shape (num_frames, height, width, 3).
+        result (np.ndarray): np array of decoded frames of shape (num_frames, 3, height, width).
     '''
     frames = []
     container.seek(0)
@@ -77,7 +90,7 @@ def read_video_pyav(container, indices):
             frame_array = frame.to_ndarray(format="rgb24")
             # Apply resize transform and convert back to numpy
             resized_frame = resize_transform(frame_array).numpy()
-            # Convert from CxHxW to HxWxC format and scale back to 0-255 range
+            # Scale back to 0-255 range
             resized_frame = (resized_frame.transpose(1, 2, 0) * 255).astype(np.uint8)
             frames.append(resized_frame)
 
@@ -90,7 +103,7 @@ def get_frames(video_path: str, num_frames: int = 8) -> np.ndarray:
         video_path (str): Path to video file
         num_frames (int): Number of frames to extract
     Returns:
-        np.ndarray: Array of frames with shape (num_frames, height, width, 3)
+        np.ndarray: Array of frames with shape (num_frames, 3, height, width)
     """
     container = av.open(video_path)
 
@@ -141,7 +154,6 @@ class VideoDataset(Dataset):
         frames = get_frames(video_path, self.num_frames)
 
         tmp_prompt = "Translate the American Sign Language (ASL) demonstrated in the video to English text, where each frame shows ASL signs used at different time points chronologically."
-
         prompt = f"USER: <video> {tmp_prompt}\nASSISTANT: Answer: {sentence}"
 
         frames_list = [frame for frame in frames]
@@ -149,6 +161,31 @@ class VideoDataset(Dataset):
         frame_tensor = torch.stack(frames_list)
 
         return prompt, frame_tensor
+
+# Create dataset and dataloader
+def create_data_loader(video_dir, csv_file, batch_size, num_frames=8):
+    dataset = VideoDataset(
+        video_dir=video_dir,
+        csv_file=csv_file,
+        num_frames=num_frames
+    )
+
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,  # Set to 0 for debugging
+        pin_memory=False
+    )
+
+    return loader
+
+train_loader = create_data_loader(
+    video_dir=VIDEO_DIR,
+    csv_file=CSV_FILE,
+    batch_size=BATCH_SIZE,
+    num_frames = 16
+)
 
 def train_epoch(model, train_loader, optimizer, processor, device, epoch):
     model.train()
@@ -181,6 +218,35 @@ def train_epoch(model, train_loader, optimizer, processor, device, epoch):
             pixel_values_videos = batch["pixel_values_videos"].to(device)
             labels = batch["labels"].to(device)
 
+            # Calculate the number of visual tokens
+            n_video_tokens = (input_ids == processor.tokenizer.convert_tokens_to_ids("<video>")).sum().item()
+            frame_count = pixel_values_videos.shape[1]
+            height, width = pixel_values_videos.shape[3], pixel_values_videos.shape[4]
+            expected_tokens = frame_count * (height // processor.patch_size) * (width // processor.patch_size) // 4
+
+            if n_video_tokens != expected_tokens:
+              print(f"Adjusting <video> tokens from {n_video_tokens} to {expected_tokens}")
+
+              # Adjust attention_mask
+              adjusted_attention_mask = torch.ones((1, input_ids.size(1) + expected_tokens - n_video_tokens), device=device)
+              adjusted_attention_mask[:, :input_ids.size(1)] = attention_mask
+              attention_mask = adjusted_attention_mask
+
+              # Adjust input_ids
+              if n_video_tokens < expected_tokens:
+                  extra_tokens = expected_tokens - n_video_tokens
+                  new_tokens = torch.full((1, extra_tokens), processor.tokenizer.convert_tokens_to_ids("<video>"), device=device)
+                  input_ids = torch.cat([input_ids, new_tokens], dim=-1)
+              elif n_video_tokens > expected_tokens:
+                  mask = input_ids != processor.tokenizer.convert_tokens_to_ids("<video>")
+                  input_ids = input_ids[mask]
+                  input_ids = input_ids[:, :expected_tokens]  # Truncate to expected length
+
+              # Adjust labels
+              adjusted_labels = torch.full_like(input_ids, -100)  # Start with all tokens ignored
+              adjusted_labels[:, :labels.size(1)] = labels
+              labels = adjusted_labels
+
             optimizer.zero_grad()
 
             outputs = model(
@@ -189,6 +255,7 @@ def train_epoch(model, train_loader, optimizer, processor, device, epoch):
                 pixel_values_videos=pixel_values_videos,
                 labels=labels
             )
+
             loss = outputs.loss
 
             if isinstance(model, DataParallel):
@@ -230,44 +297,6 @@ def train_epoch(model, train_loader, optimizer, processor, device, epoch):
 
     return total_loss / len(train_loader)
 
-# Create dataset and dataloader
-def create_data_loader(video_dir, csv_file, batch_size, num_frames=8):
-    dataset = VideoDataset(
-        video_dir=video_dir,
-        csv_file=csv_file,
-        num_frames=num_frames
-    )
-
-    loader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=0,  # Set to 0 for debugging
-        pin_memory=False
-    )
-
-    return loader
-
-quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16
-)
-
-model = LlavaNextVideoForConditionalGeneration.from_pretrained(
-    MODEL_ID,
-    torch_dtype=torch.float16,
-    device_map="auto",
-    cache_dir=CACHE_DIR,
-    quantization_config=quantization_config
-)
-
-train_loader = create_data_loader(
-    video_dir=VIDEO_DIR,
-    csv_file=CSV_FILE,
-    batch_size=BATCH_SIZE,
-    num_frames=16
-)
-
 p_model = prepare_model_for_kbit_training(model)
 
 # Configure LoRA
@@ -290,9 +319,8 @@ if torch.cuda.device_count() > 1:
     p_model = DataParallel(p_model)
 
 optimizer = torch.optim.AdamW(p_model.parameters(), lr=1e-3)
-processor = AutoProcessor.from_pretrained(MODEL_ID)
+processor = LlavaNextVideoProcessor.from_pretrained(MODEL_ID)
 processor.tokenizer.padding_side = "right"
-processor.image_processor.do_rescale = False
 
 for i in range(4):
     train_epoch(p_model, train_loader, optimizer, processor, device, i)
