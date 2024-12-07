@@ -58,6 +58,31 @@ model = LlavaNextVideoForConditionalGeneration.from_pretrained(
     quantization_config=quantization_config
 )
 
+p_model = prepare_model_for_kbit_training(model)
+
+# Configure LoRA
+peft_config = LoraConfig(
+    r=LORA_R,
+    lora_alpha=LORA_ALPHA,
+    target_modules=LORA_TARGET_MODULES,
+    lora_dropout=LORA_DROPOUT,
+    bias="none",
+    task_type=TaskType.CAUSAL_LM
+)
+
+# Get PEFT model
+p_model = get_peft_model(p_model, peft_config)
+p_model.print_trainable_parameters()
+
+p_model = p_model.cuda()
+if torch.cuda.device_count() > 1:
+    print(f"Using {torch.cuda.device_count()} GPUs!")
+    p_model = DataParallel(p_model)
+
+optimizer = torch.optim.AdamW(p_model.parameters(), lr=1e-3)
+processor = LlavaNextVideoProcessor.from_pretrained(MODEL_ID)
+processor.tokenizer.padding_side = "right"
+
 def read_video_pyav(container, indices):
     '''
     Decode the video with PyAV decoder.
@@ -183,6 +208,32 @@ train_loader = create_data_loader(
     num_frames = 16
 )
 
+def adjust_tokens(input_ids, attention_mask, labels, n_video_tokens, expected_tokens, processor, device):
+    if n_video_tokens != expected_tokens:
+        print(f"Adjusting <video> tokens from {n_video_tokens} to {expected_tokens}")
+
+        # Adjust attention_mask
+        adjusted_attention_mask = torch.ones((1, input_ids.size(1) + expected_tokens - n_video_tokens), device=device)
+        adjusted_attention_mask[:, :input_ids.size(1)] = attention_mask
+        attention_mask = adjusted_attention_mask
+
+        # Adjust input_ids
+        if n_video_tokens < expected_tokens:
+            extra_tokens = expected_tokens - n_video_tokens
+            new_tokens = torch.full((1, extra_tokens), processor.tokenizer.convert_tokens_to_ids("<video>"), device=device)
+            input_ids = torch.cat([input_ids, new_tokens], dim=-1)
+        elif n_video_tokens > expected_tokens:
+            mask = input_ids != processor.tokenizer.convert_tokens_to_ids("<video>")
+            input_ids = input_ids[mask]
+            input_ids = input_ids[:, :expected_tokens]  # Truncate to expected length
+
+        # Adjust labels
+        adjusted_labels = torch.full_like(input_ids, -100)  # Start with all tokens ignored
+        adjusted_labels[:, :labels.size(1)] = labels
+        labels = adjusted_labels
+
+        return input_ids, attention_mask, labels
+
 def train_epoch(model, train_loader, optimizer, processor, device, epoch):
     model.train()
     total_loss = 0
@@ -214,34 +265,11 @@ def train_epoch(model, train_loader, optimizer, processor, device, epoch):
             pixel_values_videos = batch["pixel_values_videos"].to(device)
             labels = batch["labels"].to(device)
 
-            # Calculate the number of visual tokens
             n_video_tokens = (input_ids == processor.tokenizer.convert_tokens_to_ids("<video>")).sum().item()
             frame_count = pixel_values_videos.shape[1]
             height, width = pixel_values_videos.shape[3], pixel_values_videos.shape[4]
             expected_tokens = frame_count * (height // processor.patch_size) * (width // processor.patch_size) // 4
-
-            if n_video_tokens != expected_tokens:
-              print(f"Adjusting <video> tokens from {n_video_tokens} to {expected_tokens}")
-
-              # Adjust attention_mask
-              adjusted_attention_mask = torch.ones((1, input_ids.size(1) + expected_tokens - n_video_tokens), device=device)
-              adjusted_attention_mask[:, :input_ids.size(1)] = attention_mask
-              attention_mask = adjusted_attention_mask
-
-              # Adjust input_ids
-              if n_video_tokens < expected_tokens:
-                  extra_tokens = expected_tokens - n_video_tokens
-                  new_tokens = torch.full((1, extra_tokens), processor.tokenizer.convert_tokens_to_ids("<video>"), device=device)
-                  input_ids = torch.cat([input_ids, new_tokens], dim=-1)
-              elif n_video_tokens > expected_tokens:
-                  mask = input_ids != processor.tokenizer.convert_tokens_to_ids("<video>")
-                  input_ids = input_ids[mask]
-                  input_ids = input_ids[:, :expected_tokens]  # Truncate to expected length
-
-              # Adjust labels
-              adjusted_labels = torch.full_like(input_ids, -100)  # Start with all tokens ignored
-              adjusted_labels[:, :labels.size(1)] = labels
-              labels = adjusted_labels
+            input_ids, attention_mask, labels = adjust_tokens(input_ids, attention_mask, labels, n_video_tokens, expected_tokens, processor, device)
 
             optimizer.zero_grad()
 
@@ -292,31 +320,6 @@ def train_epoch(model, train_loader, optimizer, processor, device, epoch):
     torch.save(checkpoint, checkpoint_path)
 
     return total_loss / len(train_loader)
-
-p_model = prepare_model_for_kbit_training(model)
-
-# Configure LoRA
-peft_config = LoraConfig(
-    r=LORA_R,
-    lora_alpha=LORA_ALPHA,
-    target_modules=LORA_TARGET_MODULES,
-    lora_dropout=LORA_DROPOUT,
-    bias="none",
-    task_type=TaskType.CAUSAL_LM
-)
-
-# Get PEFT model
-p_model = get_peft_model(p_model, peft_config)
-p_model.print_trainable_parameters()
-
-p_model = p_model.cuda()
-if torch.cuda.device_count() > 1:
-    print(f"Using {torch.cuda.device_count()} GPUs!")
-    p_model = DataParallel(p_model)
-
-optimizer = torch.optim.AdamW(p_model.parameters(), lr=1e-3)
-processor = LlavaNextVideoProcessor.from_pretrained(MODEL_ID)
-processor.tokenizer.padding_side = "right"
 
 for i in range(4):
     train_epoch(p_model, train_loader, optimizer, processor, device, i)
