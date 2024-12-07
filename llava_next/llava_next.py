@@ -11,19 +11,15 @@ from typing import Tuple
 import pandas as pd
 from torch.nn.parallel import DataParallel
 
-os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
-
-torch.cuda.empty_cache()
-
 # Constants
 MODEL_ID = "llava-hf/LLaVA-NeXT-Video-7B-hf"
 MODEL_NAME = MODEL_ID.split("/")[-1]
 
 # File/directory
-VIDEO_DIR = "/scratch/as18464/raw_videos"
-CSV_FILE = "valid_clips.csv"
+VIDEO_DIR = "/scratch/mg7609/ASL-Interpreter/data/raw_videos"
+CSV_FILE = "/scratch/mg7609/ASL-Interpreter/data/valid_clips.csv"
 CACHE_DIR = "cache/"
-DATASET_SIZE = 10000
+DATASET_SIZE = 4
 
 # LoRA hyperparameters
 LORA_R = 8
@@ -42,8 +38,6 @@ LORA_TARGET_MODULES = [
 # model constants
 BATCH_SIZE = 1
 MAX_LENGTH = 350
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def read_video_pyav(container, indices):
     '''
@@ -277,6 +271,12 @@ def train_epoch(model, train_loader, optimizer, processor, device, epoch):
     return total_loss / len(train_loader)
 
 def train():
+    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
+    torch.cuda.empty_cache()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.float16
