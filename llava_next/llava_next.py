@@ -37,7 +37,7 @@ LORA_TARGET_MODULES = [
 
 # model constants
 BATCH_SIZE = 1
-MAX_LENGTH = 350
+MAX_LENGTH = 3500
 
 def read_video_pyav(container, indices):
     '''
