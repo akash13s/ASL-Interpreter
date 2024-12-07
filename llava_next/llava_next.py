@@ -45,44 +45,6 @@ MAX_LENGTH = 350
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16
-)
-
-model = LlavaNextVideoForConditionalGeneration.from_pretrained(
-    MODEL_ID,
-    torch_dtype=torch.float16,
-    device_map="auto",
-    cache_dir=CACHE_DIR,
-    quantization_config=quantization_config
-)
-
-p_model = prepare_model_for_kbit_training(model)
-
-# Configure LoRA
-peft_config = LoraConfig(
-    r=LORA_R,
-    lora_alpha=LORA_ALPHA,
-    target_modules=LORA_TARGET_MODULES,
-    lora_dropout=LORA_DROPOUT,
-    bias="none",
-    task_type=TaskType.CAUSAL_LM
-)
-
-# Get PEFT model
-p_model = get_peft_model(p_model, peft_config)
-p_model.print_trainable_parameters()
-
-p_model = p_model.cuda()
-if torch.cuda.device_count() > 1:
-    print(f"Using {torch.cuda.device_count()} GPUs!")
-    p_model = DataParallel(p_model)
-
-optimizer = torch.optim.AdamW(p_model.parameters(), lr=1e-3)
-processor = LlavaNextVideoProcessor.from_pretrained(MODEL_ID)
-processor.tokenizer.padding_side = "right"
-
 def read_video_pyav(container, indices):
     '''
     Decode the video with PyAV decoder.
@@ -201,13 +163,6 @@ def create_data_loader(video_dir, csv_file, batch_size, num_frames=8):
 
     return loader
 
-train_loader = create_data_loader(
-    video_dir=VIDEO_DIR,
-    csv_file=CSV_FILE,
-    batch_size=BATCH_SIZE,
-    num_frames = 16
-)
-
 def adjust_tokens(input_ids, attention_mask, labels, n_video_tokens, expected_tokens, processor, device):
     if n_video_tokens != expected_tokens:
         print(f"Adjusting <video> tokens from {n_video_tokens} to {expected_tokens}")
@@ -321,5 +276,54 @@ def train_epoch(model, train_loader, optimizer, processor, device, epoch):
 
     return total_loss / len(train_loader)
 
-for i in range(4):
-    train_epoch(p_model, train_loader, optimizer, processor, device, i)
+def train():
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype=torch.float16
+    )
+
+    model = LlavaNextVideoForConditionalGeneration.from_pretrained(
+        MODEL_ID,
+        torch_dtype=torch.float16,
+        device_map="auto",
+        cache_dir=CACHE_DIR,
+        quantization_config=quantization_config
+    )
+
+    p_model = prepare_model_for_kbit_training(model)
+
+    # Configure LoRA
+    peft_config = LoraConfig(
+        r=LORA_R,
+        lora_alpha=LORA_ALPHA,
+        target_modules=LORA_TARGET_MODULES,
+        lora_dropout=LORA_DROPOUT,
+        bias="none",
+        task_type=TaskType.CAUSAL_LM
+    )
+
+    # Get PEFT model
+    p_model = get_peft_model(p_model, peft_config)
+    # p_model.print_trainable_parameters()
+
+    p_model = p_model.cuda()
+    if torch.cuda.device_count() > 1:
+        # print(f"Using {torch.cuda.device_count()} GPUs!")
+        p_model = DataParallel(p_model)
+
+    optimizer = torch.optim.AdamW(p_model.parameters(), lr=1e-3)
+    processor = LlavaNextVideoProcessor.from_pretrained(MODEL_ID)
+    processor.tokenizer.padding_side = "right"
+
+    train_loader = create_data_loader(
+        video_dir=VIDEO_DIR,
+        csv_file=CSV_FILE,
+        batch_size=BATCH_SIZE,
+        num_frames = 16
+    )
+
+    for epoch in range(4):
+        train_epoch(p_model, train_loader, optimizer, processor, device, epoch)
+
+if __name__ == "__main__":
+    train()
