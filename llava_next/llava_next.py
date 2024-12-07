@@ -312,6 +312,8 @@ def train():
     optimizer = torch.optim.AdamW(p_model.parameters(), lr=1e-3)
     processor = LlavaNextVideoProcessor.from_pretrained(MODEL_ID)
     processor.tokenizer.padding_side = "right"
+    processor.image_processor.do_rescale = False
+    processor.video_processor.do_rescale = False
 
     train_loader = create_data_loader(
         video_dir=VIDEO_DIR,
