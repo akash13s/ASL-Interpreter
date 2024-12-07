@@ -30,7 +30,7 @@ MODEL_NAME = MODEL_ID.split("/")[-1]
 VIDEO_DIR = "/scratch/as18464/raw_videos"
 CSV_FILE = "valid_clips.csv"
 CACHE_DIR = "cache/"
-DATASET_SIZE = 1000
+DATASET_SIZE = 100
 
 # LoRA hyperparameters
 LORA_R = 8
@@ -142,7 +142,7 @@ class VideoDataset(Dataset):
         
         frames = get_frames(video_path, self.num_frames)
 
-        tmp_prompt = "Analyze the American Sign Language (ASL) signs in this video and translate them into clear, natural English. Consider the sequence of signs as a complete message, and provide an accurate translation that captures the full meaning. Respond with only the English translation, without descriptions of the signs themselves."
+        tmp_prompt = "Analyze the American Sign Language (ASL) signs in this video and translate them into clear, natural English. Consider the sequence of signs as a complete message, and provide an accurate translation that captures the full meaning. Respond with only the English translation, without descriptions of the signs themselves."        
         
         prompt = f"USER: <video> {tmp_prompt}\nASSISTANT: Answer: {sentence}"
 
@@ -175,6 +175,29 @@ def train_epoch(model, train_loader, optimizer, processor, accelerator, epoch):
             
             labels = batch["input_ids"].clone()
             labels[labels == processor.tokenizer.pad_token_id] = -100
+
+            for i, text in enumerate(texts):
+                assistant_start = None
+                # Look for sequence: "ASSISTANT:"
+                for j in range(len(batch["input_ids"][i])):
+                    if processor.tokenizer.decode(batch["input_ids"][i][j:j+4]) == "ASSISTANT:":
+                        assistant_start = j
+                        break
+                
+                if assistant_start is not None:
+                    # Mask everything before and including "ASSISTANT:"
+                    labels[i, :assistant_start+4] = -100
+
+            # To remove later - for debugging
+            # print("\n====== Tokens and Labels for Batch", batch_idx, "======")
+            # for i, text in enumerate(texts):
+            #     print(f"\nOriginal text {i}: {text}")
+            #     print("\nTokens and their labels:")
+            #     tokens = processor.tokenizer.convert_ids_to_tokens(batch["input_ids"][i])
+            #     for j, (token, label) in enumerate(zip(tokens, labels[i])):
+            #         print(f"Position {j:3d} | Token: {token:15} | Label: {label.item():5}")
+            #     print("-" * 50)
+            
             batch["labels"] = labels
             
             input_ids = accelerator.prepare(batch["input_ids"])
@@ -213,7 +236,7 @@ def train_epoch(model, train_loader, optimizer, processor, accelerator, epoch):
         except Exception as e:
             raise e
 
-    if accelerator.is_main_process:
+    if accelerator.is_main_process and epoch%2 == 0:
         checkpoint_path = f"output/checkpoint_epoch_{epoch}"
         os.makedirs("output", exist_ok=True)
         
@@ -319,5 +342,5 @@ processor = AutoProcessor.from_pretrained(MODEL_ID)
 processor.tokenizer.padding_side = "right"
 processor.image_processor.do_rescale = False
 
-for i in range(5):
-    train_epoch(p_model, train_loader, optimizer, processor, accelerator, i)
+for i in range(20):
+    train_epoch(p_model, train_loader, optimizer, processor, accelerator, i+1)
