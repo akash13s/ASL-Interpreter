@@ -130,7 +130,7 @@ class VideoDataset(Dataset):
 
         frames = get_frames(video_path, self.num_frames)
 
-        tmp_prompt = "Translate the American Sign Language (ASL) demonstrated in the video to English text, where each frame shows ASL signs used at different time points chronologically."
+        tmp_prompt = "Analyze the American Sign Language (ASL) signs in this video and translate them into clear, natural English. Consider the sequence of signs as a complete message, and provide an accurate translation that captures the full meaning. Respond with only the English translation, without descriptions of the signs themselves."
         prompt = f"USER: <video> {tmp_prompt}\nASSISTANT: Answer: {sentence}"
 
         frames_list = [frame for frame in frames]
@@ -159,8 +159,6 @@ def create_data_loader(video_dir, csv_file, batch_size, num_frames=8):
 
 def adjust_tokens(input_ids, attention_mask, labels, n_video_tokens, expected_tokens, processor, device):
     if n_video_tokens != expected_tokens:
-        print(f"Adjusting <video> tokens from {n_video_tokens} to {expected_tokens}")
-
         # Adjust attention_mask
         adjusted_attention_mask = torch.ones((1, input_ids.size(1) + expected_tokens - n_video_tokens), device=device)
         adjusted_attention_mask[:, :input_ids.size(1)] = attention_mask
