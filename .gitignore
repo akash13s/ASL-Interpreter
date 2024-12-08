@@ -19,4 +19,5 @@ runs
 .idea
 .vscode
 output/
+outputs/
 cache/
