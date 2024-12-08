@@ -1,9 +1,7 @@
-from transformers import AutoProcessor, VideoLlavaForConditionalGeneration
 import torch
-from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
-
 from components.quantizations import get_bnb_config
-
+from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
+from transformers import VideoLlavaForConditionalGeneration
 
 LORA_TARGET_MODULES = [
     "q_proj",
@@ -15,6 +13,7 @@ LORA_TARGET_MODULES = [
     "down_proj",
 ]
 
+
 def get_base_model(model_id, bnb_config, cache_dir):
     return VideoLlavaForConditionalGeneration.from_pretrained(
         model_id,
@@ -23,7 +22,8 @@ def get_base_model(model_id, bnb_config, cache_dir):
         quantization_config=bnb_config,
         device_map="auto",
     )
-    
+
+
 def get_lora_config(lora_r, lora_alpha, lora_dropout):
     return LoraConfig(
         r=lora_r,
@@ -34,6 +34,7 @@ def get_lora_config(lora_r, lora_alpha, lora_dropout):
         task_type=TaskType.CAUSAL_LM
     )
 
+
 def set_trainable_params(model):
     # First make sure all parameters are not trainable
     for param in model.parameters():
@@ -43,6 +44,7 @@ def set_trainable_params(model):
     for name, param in model.named_parameters():
         if "lora_" in name:  # This targets only the LoRA layers
             param.requires_grad = True
+
 
 def get_model(
         model_id: str,

@@ -1,5 +1,6 @@
-from transformers import BitsAndBytesConfig
 import torch
+from transformers import BitsAndBytesConfig
+
 
 def get_8bit_qlora(use_double_quant: bool):
     return BitsAndBytesConfig(
@@ -9,6 +10,7 @@ def get_8bit_qlora(use_double_quant: bool):
         bnb_4bit_use_double_quant=use_double_quant
     )
 
+
 def get_4bit_qlora(use_double_quant: bool):
     return BitsAndBytesConfig(
         load_in_4bit=True,
@@ -16,6 +18,7 @@ def get_4bit_qlora(use_double_quant: bool):
         bnb_4bit_compute_dtype=torch.float16,
         bnb_4bit_use_double_quant=use_double_quant
     )
+
 
 def get_lora():
     return BitsAndBytesConfig(
@@ -29,11 +32,12 @@ def get_lora():
         bnb_4bit_compute_dtype=torch.float16
     )
 
+
 def get_bnb_config(use_qlora: bool, use_8bit: bool, use_double_quant: bool):
     if use_qlora:
         if use_8bit:
             return get_8bit_qlora(use_double_quant)
-        
+
         return get_4bit_qlora(use_double_quant)
-    
+
     return get_lora()

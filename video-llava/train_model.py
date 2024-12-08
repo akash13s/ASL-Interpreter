@@ -1,22 +1,9 @@
-import av
-import bisect
-import numpy as np
-import torch
-from torchvision import transforms
-from torch.utils.data import Dataset, DataLoader
-from transformers import AutoProcessor, BitsAndBytesConfig, VideoLlavaForConditionalGeneration
-from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
-import json
-import torch.nn.utils.prune as prune
-from tqdm import tqdm
 import os
-from typing import Tuple, Any
-import pandas as pd
-from torch.cuda.amp import autocast
-# from torch.nn.parallel import DataParallel
 
+import torch
 from accelerate import Accelerator
 from accelerate import DistributedDataParallelKwargs
+from transformers import AutoProcessor
 
 from components.dataloader import create_data_loader
 from components.model import get_model
@@ -32,9 +19,9 @@ MODEL_NAME = MODEL_ID.split("/")[-1]
 
 # File/directory
 VIDEO_DIR = "/scratch/as18464/raw_videos"
-CSV_FILE = "valid_clips.csv"
-CACHE_DIR = "cache/"
-DATASET_SIZE = 100
+CSV_FILE = "../data/valid_clips.csv"
+CACHE_DIR = "../cache/"
+OUTPUT_DIR = "../output/"
 
 # Quantization parameters
 USE_QLORA = True
@@ -56,6 +43,7 @@ LORA_TARGET_MODULES = [
 ]
 
 # model constants
+DATASET_SIZE = 100
 BATCH_SIZE = 4
 MAX_LENGTH = 128
 LEARNING_RATE = 1e-4
@@ -97,5 +85,15 @@ processor = AutoProcessor.from_pretrained(MODEL_ID)
 processor.tokenizer.padding_side = "right"
 processor.image_processor.do_rescale = False
 
+config = {
+    "model": p_model,
+    "train_loader": train_loader,
+    "optimizer": optimizer,
+    "processor": processor,
+    "accelerator": accelerator,
+    "output_dir": OUTPUT_DIR,
+    "max_length": MAX_LENGTH
+}
+
 for i in range(20):
-    train_epoch(p_model, train_loader, optimizer, processor, accelerator, i+1)
+    train_epoch(config, i + 1)
