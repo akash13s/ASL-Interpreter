@@ -126,6 +126,12 @@ class VideoDataset(Dataset):
         self.video_dir = video_dir
         self.annotations = pd.read_csv(csv_file, sep=',').head(DATASET_SIZE).reset_index(drop=True)
         self.num_frames = num_frames
+        self.system_prompt = ("Analyze the American Sign Language (ASL) signs in this video and "
+                            "translate them into clear, natural English. Consider the sequence of "
+                            "signs as a complete message, and provide an accurate translation that "
+                            "captures the full meaning. Respond with only the English translation, "
+                            "without descriptions of the signs themselves.")
+        
         print(f"Loaded dataset with {len(self.annotations)} entries")
     
     def __len__(self) -> int:
@@ -141,10 +147,8 @@ class VideoDataset(Dataset):
             raise FileNotFoundError(f"Video file '{video_path}' not found.")
         
         frames = get_frames(video_path, self.num_frames)
-
-        tmp_prompt = "Analyze the American Sign Language (ASL) signs in this video and translate them into clear, natural English. Consider the sequence of signs as a complete message, and provide an accurate translation that captures the full meaning. Respond with only the English translation, without descriptions of the signs themselves."        
         
-        prompt = f"USER: <video> {tmp_prompt}\nASSISTANT: Answer: {sentence}"
+        prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT: {sentence}"
 
         frames_list = [frame for frame in frames]
         frames_list = [transforms.ToTensor()(frame) for frame in frames_list]
@@ -177,23 +181,16 @@ def train_epoch(model, train_loader, optimizer, processor, accelerator, epoch):
             labels[labels == processor.tokenizer.pad_token_id] = -100
 
             for i, text in enumerate(texts):
-                # First find ASSISTANT:
-                assistant_tokens = processor.tokenizer.encode("ASSISTANT:", add_special_tokens=False)
-                input_ids = batch["input_ids"][i].tolist()
-                
-                # Then find Answer: after ASSISTANT:
-                answer_tokens = processor.tokenizer.encode("Answer:", add_special_tokens=False)
-                
-                # Find the position of "Answer:"
-                answer_start = None
-                for j in range(len(input_ids) - len(answer_tokens)):
-                    if input_ids[j:j+len(answer_tokens)] == answer_tokens:
-                        answer_start = j
+                assistant_start = None
+                # Look for sequence: "ASSISTANT:"
+                for j in range(len(batch["input_ids"][i])):
+                    if processor.tokenizer.decode(batch["input_ids"][i][j:j+4]) == "ASSISTANT:":
+                        assistant_start = j
                         break
-        
-                if answer_start is not None:
-                    # Mask everything up to and including "Answer:"
-                    labels[i, :answer_start+len(answer_tokens)] = -100
+                
+                if assistant_start is not None:
+                    # Mask everything before and including "ASSISTANT:"
+                    labels[i, :assistant_start+4] = -100
 
             # To remove later - for debugging
             # print("\n====== Tokens and Labels for Batch", batch_idx, "======")
