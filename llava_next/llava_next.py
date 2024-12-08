@@ -159,30 +159,6 @@ def create_data_loader(video_dir, csv_file, batch_size, num_frames=8):
 
     return loader
 
-def adjust_tokens(input_ids, attention_mask, labels, n_video_tokens, expected_tokens, processor, device):
-    if n_video_tokens != expected_tokens:
-        # Adjust attention_mask
-        adjusted_attention_mask = torch.ones((1, input_ids.size(1) + expected_tokens - n_video_tokens), device=device)
-        adjusted_attention_mask[:, :input_ids.size(1)] = attention_mask
-        attention_mask = adjusted_attention_mask
-
-        # Adjust input_ids
-        if n_video_tokens < expected_tokens:
-            extra_tokens = expected_tokens - n_video_tokens
-            new_tokens = torch.full((1, extra_tokens), processor.tokenizer.convert_tokens_to_ids("<video>"), device=device)
-            input_ids = torch.cat([input_ids, new_tokens], dim=-1)
-        elif n_video_tokens > expected_tokens:
-            mask = input_ids != processor.tokenizer.convert_tokens_to_ids("<video>")
-            input_ids = input_ids[mask]
-            input_ids = input_ids[:, :expected_tokens]  # Truncate to expected length
-
-        # Adjust labels
-        adjusted_labels = torch.full_like(input_ids, -100)  # Start with all tokens ignored
-        adjusted_labels[:, :labels.size(1)] = labels
-        labels = adjusted_labels
-
-        return input_ids, attention_mask, labels
-
 def train_epoch(model, train_loader, optimizer, processor, device, epoch):
     model.train()
     total_loss = 0
@@ -218,7 +194,27 @@ def train_epoch(model, train_loader, optimizer, processor, device, epoch):
             frame_count = pixel_values_videos.shape[1]
             height, width = pixel_values_videos.shape[3], pixel_values_videos.shape[4]
             expected_tokens = frame_count * (height // processor.patch_size) * (width // processor.patch_size) // 4
-            input_ids, attention_mask, labels = adjust_tokens(input_ids, attention_mask, labels, n_video_tokens, expected_tokens, processor, device)
+            
+            if n_video_tokens != expected_tokens:
+                # Adjust attention_mask
+                adjusted_attention_mask = torch.ones((1, input_ids.size(1) + expected_tokens - n_video_tokens), device=device)
+                adjusted_attention_mask[:, :input_ids.size(1)] = attention_mask
+                attention_mask = adjusted_attention_mask
+
+                # Adjust input_ids
+                if n_video_tokens < expected_tokens:
+                    extra_tokens = expected_tokens - n_video_tokens
+                    new_tokens = torch.full((1, extra_tokens), processor.tokenizer.convert_tokens_to_ids("<video>"), device=device)
+                    input_ids = torch.cat([input_ids, new_tokens], dim=-1)
+                elif n_video_tokens > expected_tokens:
+                    mask = input_ids != processor.tokenizer.convert_tokens_to_ids("<video>")
+                    input_ids = input_ids[mask]
+                    input_ids = input_ids[:, :expected_tokens]  # Truncate to expected length
+
+                # Adjust labels
+                adjusted_labels = torch.full_like(input_ids, -100)  # Start with all tokens ignored
+                adjusted_labels[:, :labels.size(1)] = labels
+                labels = adjusted_labels
 
             optimizer.zero_grad()
 
