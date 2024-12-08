@@ -38,6 +38,8 @@ LORA_TARGET_MODULES = [
 # model constants
 BATCH_SIZE = 1
 MAX_LENGTH = 3500
+LEARNING_RATE = 1e-4
+WEIGHT_DECAY = 0.05
 
 def read_video_pyav(container, indices):
     '''
@@ -309,7 +311,7 @@ def train():
         # print(f"Using {torch.cuda.device_count()} GPUs!")
         p_model = DataParallel(p_model)
 
-    optimizer = torch.optim.AdamW(p_model.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(p_model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     processor = LlavaNextVideoProcessor.from_pretrained(MODEL_ID)
     processor.tokenizer.padding_side = "right"
     processor.image_processor.do_rescale = False
