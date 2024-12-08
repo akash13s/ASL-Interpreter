@@ -48,9 +48,9 @@ LORA_TARGET_MODULES = [
 
 # model constants
 BATCH_SIZE = 4
-MAX_LENGTH = 3500
+MAX_LENGTH = 128
 LEARNING_RATE = 1e-4
-WEIGHT_DECAY = 0.01
+WEIGHT_DECAY = 0.05
 
 def read_video_pyav(container, indices):
     '''
@@ -177,16 +177,23 @@ def train_epoch(model, train_loader, optimizer, processor, accelerator, epoch):
             labels[labels == processor.tokenizer.pad_token_id] = -100
 
             for i, text in enumerate(texts):
-                assistant_start = None
-                # Look for sequence: "ASSISTANT:"
-                for j in range(len(batch["input_ids"][i])):
-                    if processor.tokenizer.decode(batch["input_ids"][i][j:j+4]) == "ASSISTANT:":
-                        assistant_start = j
-                        break
+                # First find ASSISTANT:
+                assistant_tokens = processor.tokenizer.encode("ASSISTANT:", add_special_tokens=False)
+                input_ids = batch["input_ids"][i].tolist()
                 
-                if assistant_start is not None:
-                    # Mask everything before and including "ASSISTANT:"
-                    labels[i, :assistant_start+4] = -100
+                # Then find Answer: after ASSISTANT:
+                answer_tokens = processor.tokenizer.encode("Answer:", add_special_tokens=False)
+                
+                # Find the position of "Answer:"
+                answer_start = None
+                for j in range(len(input_ids) - len(answer_tokens)):
+                    if input_ids[j:j+len(answer_tokens)] == answer_tokens:
+                        answer_start = j
+                        break
+        
+                if answer_start is not None:
+                    # Mask everything up to and including "Answer:"
+                    labels[i, :answer_start+len(answer_tokens)] = -100
 
             # To remove later - for debugging
             # print("\n====== Tokens and Labels for Batch", batch_idx, "======")
@@ -236,7 +243,7 @@ def train_epoch(model, train_loader, optimizer, processor, accelerator, epoch):
         except Exception as e:
             raise e
 
-    if accelerator.is_main_process and epoch%2 == 0:
+    if accelerator.is_main_process and epoch%5 == 0:
         checkpoint_path = f"output/checkpoint_epoch_{epoch}"
         os.makedirs("output", exist_ok=True)
         
