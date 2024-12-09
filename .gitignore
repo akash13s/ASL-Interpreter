@@ -13,10 +13,12 @@ __pycache__
 *.bin
 *.t7
 *.pkl
+*.out
 checkpoints
 runs
 
 .idea
 .vscode
 output/
+outputs/
 cache/
