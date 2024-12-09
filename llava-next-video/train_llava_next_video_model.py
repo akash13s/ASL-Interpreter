@@ -84,6 +84,7 @@ p_model, optimizer, train_loader = accelerator.prepare(
 processor = AutoProcessor.from_pretrained(MODEL_ID)
 processor.tokenizer.padding_side = "right"
 processor.image_processor.do_rescale = False
+processor.video_processor.do_rescale = False
 
 config = {
     "model": p_model,
