@@ -1,7 +1,7 @@
 # Create dataset and dataloader
 from torch.utils.data import DataLoader
 
-from dataset import VideoDataset
+from .dataset import VideoDataset
 
 
 def create_data_loader(

@@ -1,7 +1,8 @@
 import torch
-from components.quantizations import get_bnb_config
 from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
 from transformers import VideoLlavaForConditionalGeneration
+
+from .quantizations import get_bnb_config
 
 LORA_TARGET_MODULES = [
     "q_proj",
