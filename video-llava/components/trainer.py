@@ -100,7 +100,7 @@ def train_epoch(config, epoch):
 
     if accelerator.is_main_process and epoch % 5 == 0:
         checkpoint_path = f"{output_dir}/checkpoint_epoch_{epoch}"
-        os.makedirs("output", exist_ok=True)
+        os.makedirs(f"{output_dir}", exist_ok=True)
 
         unwrapped_model = accelerator.unwrap_model(model)
 
