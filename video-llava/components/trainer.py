@@ -113,6 +113,7 @@ def train_epoch(config, epoch):
             'epoch': epoch,
             'model_state_dict': state_dict,
             'optimizer_state_dict': optimizer.state_dict(),
+            'processor_state__dict': processor.state_dict(),
             'loss': loss
         }
 
