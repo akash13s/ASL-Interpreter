@@ -67,37 +67,39 @@ def train_epoch(config, epoch):
             pixel_values_videos = accelerator.prepare(batch["pixel_values_videos"])
             labels = accelerator.prepare(batch["labels"])
 
-            input_ids = input_ids.to(accelerator.device)
-            n_video_tokens = (input_ids == processor.tokenizer.convert_tokens_to_ids("<video>")).sum().item()
             frame_count = pixel_values_videos.shape[1]
             height, width = pixel_values_videos.shape[3], pixel_values_videos.shape[4]
+            n_video_tokens = (input_ids == processor.tokenizer.convert_tokens_to_ids("<video>")).sum(dim=1)
             expected_tokens = frame_count * (height // processor.patch_size) * (width // processor.patch_size) // 4
-
-            print(f"input_ids.size(1): {input_ids.size(1)}")
-            print(f"expected_tokens: {expected_tokens}")
-            print(f"n_video_tokens: {n_video_tokens}")
-            print(f"Calculated dimension: {input_ids.size(1) + expected_tokens - n_video_tokens}")
-
-            if n_video_tokens != expected_tokens:
-                # Adjust attention_mask
-                adjusted_attention_mask = torch.ones((1, input_ids.size(1) + expected_tokens - n_video_tokens), device=accelerator.device)
-                adjusted_attention_mask[:, :input_ids.size(1)] = attention_mask
-                attention_mask = adjusted_attention_mask
-
-                # Adjust input_ids
-                if n_video_tokens < expected_tokens:
-                    extra_tokens = expected_tokens - n_video_tokens
-                    new_tokens = torch.full((1, extra_tokens), processor.tokenizer.convert_tokens_to_ids("<video>")).to(accelerator.device)
-                    input_ids = torch.cat([input_ids, new_tokens], dim=-1)
-                elif n_video_tokens > expected_tokens:
-                    mask = input_ids != processor.tokenizer.convert_tokens_to_ids("<video>")
-                    input_ids = input_ids[mask]
-                    input_ids = input_ids[:, :expected_tokens]  # Truncate to expected length
-
-                # Adjust labels
-                adjusted_labels = torch.full_like(input_ids, -100, device=accelerator.device)  # Start with all tokens ignored
-                adjusted_labels[:, :labels.size(1)] = labels
-                labels = adjusted_labels
+            token_diffs = expected_tokens - n_video_tokens
+            
+            # Adjust input_ids, attention_mask, and labels
+            max_length = input_ids.size(1) + max(0, token_diffs.max().item())
+            adjusted_input_ids = torch.full((input_ids.size(0), max_length), processor.tokenizer.pad_token_id, device=accelerator.device)
+            adjusted_attention_mask = torch.zeros((input_ids.size(0), max_length), device=accelerator.device)
+            adjusted_labels = torch.full((input_ids.size(0), max_length), -100, device=accelerator.device)
+            
+            for i in range(input_ids.size(0)):
+                current_length = input_ids.size(1)
+                diff = token_diffs[i].item()
+            
+                # Add tokens or truncate as needed
+                if diff > 0:
+                    # Add extra <video> tokens
+                    adjusted_input_ids[i, :current_length] = input_ids[i]
+                    adjusted_input_ids[i, current_length:current_length + diff] = processor.tokenizer.convert_tokens_to_ids("<video>")
+                    adjusted_attention_mask[i, :current_length + diff] = attention_mask[i]
+                    adjusted_labels[i, :current_length] = labels[i]
+                else:
+                    # Truncate tokens
+                    adjusted_input_ids[i, :current_length + diff] = input_ids[i, :current_length + diff]
+                    adjusted_attention_mask[i, :current_length + diff] = attention_mask[i, :current_length + diff]
+                    adjusted_labels[i, :current_length + diff] = labels[i, :current_length + diff]
+            
+            # Replace original tensors with adjusted ones
+            input_ids = adjusted_input_ids
+            attention_mask = adjusted_attention_mask
+            labels = adjusted_labels
 
             optimizer.zero_grad()
 
