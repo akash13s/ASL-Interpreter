@@ -72,7 +72,12 @@ def train_epoch(config, epoch):
             frame_count = pixel_values_videos.shape[1]
             height, width = pixel_values_videos.shape[3], pixel_values_videos.shape[4]
             expected_tokens = frame_count * (height // processor.patch_size) * (width // processor.patch_size) // 4
-            
+
+            print(f"input_ids.size(1): {input_ids.size(1)}")
+            print(f"expected_tokens: {expected_tokens}")
+            print(f"n_video_tokens: {n_video_tokens}")
+            print(f"Calculated dimension: {input_ids.size(1) + expected_tokens - n_video_tokens}")
+
             if n_video_tokens != expected_tokens:
                 # Adjust attention_mask
                 adjusted_attention_mask = torch.ones((1, input_ids.size(1) + expected_tokens - n_video_tokens), device=accelerator.device)
