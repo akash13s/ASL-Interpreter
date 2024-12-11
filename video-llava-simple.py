@@ -1,8 +1,12 @@
+import os
+
 import av
 import numpy as np
+import pandas as pd
 import torch
+from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
+from torch.utils.data import Dataset
 from torchvision import transforms
-from torch.utils.data import Dataset, random_split
 from transformers import (
     AutoProcessor,
     BitsAndBytesConfig,
@@ -10,11 +14,6 @@ from transformers import (
     Trainer,
     TrainingArguments
 )
-from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
-import os
-from typing import Tuple
-import pandas as pd
-
 
 # Constants
 MODEL_ID = "LanguageBind/Video-LLaVA-7B-hf"
@@ -30,7 +29,7 @@ TRAIN_VAL_SPLIT = 0.8
 # Model constants
 BATCH_SIZE = 4
 MAX_LENGTH = 128  # Fixed sequence length for text
-NUM_FRAMES = 16   # Fixed number of frames
+NUM_FRAMES = 16  # Fixed number of frames
 IMAGE_SIZE = 224  # Fixed image size
 
 # Training hyperparameters
@@ -70,8 +69,9 @@ def read_video_pyav(container, indices):
             # Convert from CxHxW to HxWxC format and scale back to 0-255 range
             resized_frame = (resized_frame.transpose(1, 2, 0) * 255).astype(np.uint8)
             frames.append(resized_frame)
-    
+
     return np.stack(frames)
+
 
 def get_frames(video_path: str, num_frames: int = 8) -> np.ndarray:
     """
@@ -83,18 +83,18 @@ def get_frames(video_path: str, num_frames: int = 8) -> np.ndarray:
         np.ndarray: Array of frames with shape (num_frames, height, width, 3)
     """
     container = av.open(video_path)
-    
+
     # Get video stream
     stream = container.streams.video[0]
     total_frames = stream.frames
     fps = stream.average_rate
-    
+
     # Calculate indices to sample
     indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
-    
+
     # Read frames at calculated indices
     frames = read_video_pyav(container, indices)
-    
+
     # Ensure we got exactly num_frames
     if len(frames) < num_frames:
         # If we got fewer frames, duplicate the last frame
@@ -104,7 +104,7 @@ def get_frames(video_path: str, num_frames: int = 8) -> np.ndarray:
     elif len(frames) > num_frames:
         # If we got more frames, take the first num_frames
         frames = frames[:num_frames]
-    
+
     container.close()
     return frames
 
@@ -116,29 +116,29 @@ class VideoDataset(Dataset):
         self.num_frames = num_frames
         self.processor = processor
         self.system_prompt = ("Analyze the American Sign Language (ASL) signs in this video and "
-                            "translate them into clear, natural English. Consider the sequence of "
-                            "signs as a complete message, and provide an accurate translation that "
-                            "captures the full meaning. Respond with only the English translation, "
-                            "without descriptions of the signs themselves.")
-        
+                              "translate them into clear, natural English. Consider the sequence of "
+                              "signs as a complete message, and provide an accurate translation that "
+                              "captures the full meaning. Respond with only the English translation, "
+                              "without descriptions of the signs themselves.")
+
         print(f"Created dataset split with {len(self.annotations)} entries")
-    
+
     def __len__(self) -> int:
         return len(self.annotations)
-    
+
     def __getitem__(self, idx: int) -> dict:
         row = self.annotations.iloc[idx]
         video_id = str(row['SENTENCE_NAME']).strip()
         sentence = str(row['SENTENCE']).strip()
-        
+
         video_path = os.path.join(self.video_dir, f"{video_id}.mp4")
         if not os.path.isfile(video_path):
             raise FileNotFoundError(f"Video file '{video_path}' not found.")
-        
+
         # Get video frames using the provided functions
         frames = get_frames(video_path, self.num_frames)
         prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT: {sentence}"
-        
+
         # Process the frames and text with fixed sizes
         inputs = self.processor(
             text=prompt,
@@ -148,21 +148,21 @@ class VideoDataset(Dataset):
             max_length=MAX_LENGTH,
             return_tensors="pt"
         )
-        
+
         # Create labels from input_ids
         labels = inputs["input_ids"].clone()
         labels[labels == self.processor.tokenizer.pad_token_id] = -100
-        
+
         # Mask everything before and including "ASSISTANT:"
         assistant_start = None
         for j in range(len(inputs["input_ids"][0])):
-            if self.processor.tokenizer.decode(inputs["input_ids"][0][j:j+4]) == "ASSISTANT:":
+            if self.processor.tokenizer.decode(inputs["input_ids"][0][j:j + 4]) == "ASSISTANT:":
                 assistant_start = j
                 break
-        
+
         if assistant_start is not None:
-            labels[0, :assistant_start+4] = -100
-        
+            labels[0, :assistant_start + 4] = -100
+
         # Return tensors with consistent sizes
         return {
             "input_ids": inputs["input_ids"].squeeze(0),
@@ -171,25 +171,26 @@ class VideoDataset(Dataset):
             "labels": labels.squeeze(0)
         }
 
+
 def create_train_val_datasets(video_dir: str, csv_file: str, processor, num_frames: int = 16):
     # Read the full dataset
     full_df = pd.read_csv(csv_file, sep=',').head(DATASET_SIZE).reset_index(drop=True)
-    
+
     # Calculate split sizes
     train_size = int(len(full_df) * TRAIN_VAL_SPLIT)
     val_size = len(full_df) - train_size
-    
+
     # Randomly shuffle the dataframe
     shuffled_df = full_df.sample(frac=1, random_state=42).reset_index(drop=True)
-    
+
     # Split the dataframe
     train_df = shuffled_df.iloc[:train_size]
     val_df = shuffled_df.iloc[train_size:]
-    
+
     # Create dataset objects
     train_dataset = VideoDataset(video_dir, train_df, processor, num_frames)
     val_dataset = VideoDataset(video_dir, val_df, processor, num_frames)
-    
+
     return train_dataset, val_dataset
 
 
@@ -229,8 +230,8 @@ def main():
     peft_config = LoraConfig(
         r=8,
         lora_alpha=32,
-        target_modules=["q_proj", "v_proj", "k_proj", "o_proj", 
-                       "gate_proj", "up_proj", "down_proj"],
+        target_modules=["q_proj", "v_proj", "k_proj", "o_proj",
+                        "gate_proj", "up_proj", "down_proj"],
         lora_dropout=0.1,
         bias="none",
         task_type=TaskType.CAUSAL_LM
@@ -270,6 +271,7 @@ def main():
 
     # Start training
     trainer.train()
+
 
 if __name__ == "__main__":
     main()
