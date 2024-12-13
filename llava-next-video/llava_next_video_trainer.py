@@ -1,5 +1,6 @@
 import os
 import logging
+import sys
 import av
 import numpy as np
 import pandas as pd
@@ -68,6 +69,10 @@ logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE),  # Log to file
+        logging.StreamHandler(sys.stdout),  # Also log to stdout
+    ],
 )
 
 # Capture Trainer logs from the Hugging Face `transformers` library

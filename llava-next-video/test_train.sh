@@ -6,7 +6,7 @@
 #SBATCH --mem=64GB
 #SBATCH --gres=gpu:1                 # Request 1 GPU per node
 #SBATCH --job-name=llava_next_video-test
-#SBATCH --output=llava_next_video-test.out
+#SBATCH --output=./logs/training.log
 #SBATCH --nice=0
 
 module purge
