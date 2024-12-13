@@ -15,6 +15,8 @@ from transformers import (
     Trainer,
     TrainingArguments
 )
+from nltk.translate.bleu_score import sentence_bleu
+from rouge_score import rouge_scorer
 
 # Constants
 MODEL_ID = "llava-hf/LLaVA-NeXT-Video-7B-hf"
@@ -304,6 +306,57 @@ def get_quantization_config(use_qlora: bool, use_4bit: bool, use_8bit: bool, use
 
     return BitsAndBytesConfig(**quantization_config)
 
+def compute_metrics(pred, processor):
+    """
+    Compute BLEU, ROUGE-L, and loss for predictions.
+
+    Args:
+        pred: Prediction object from the Trainer.
+
+    Returns:
+        dict: Dictionary containing BLEU, ROUGE-L scores, and loss.
+    """
+    logger.info("Evaluating model after epoch...")
+    predictions = pred.predictions
+    labels = pred.label_ids
+
+    # Decode predictions and labels
+    decoded_preds = processor.tokenizer.batch_decode(predictions, skip_special_tokens=True)
+    decoded_labels = processor.tokenizer.batch_decode(labels, skip_special_tokens=True)
+
+    # Strip whitespaces
+    decoded_preds = [pred.strip() for pred in decoded_preds]
+    decoded_labels = [label.strip() for label in decoded_labels]
+
+    # Compute BLEU scores
+    bleu_scores = [
+        sentence_bleu([label.split()], pred.split())  # Compare individual sentences
+        for pred, label in zip(decoded_preds, decoded_labels)
+    ]
+    bleu_score = np.mean(bleu_scores)
+
+    # Compute ROUGE scores
+    rouge = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+    rouge_scores = [
+        rouge.score(label, pred) for pred, label in zip(decoded_preds, decoded_labels)
+    ]
+    rouge_l = np.mean([score['rougeL'].fmeasure for score in rouge_scores])
+
+    # Include loss (Trainer logs loss automatically, so this is an example placeholder)
+    # If you want loss logged, it's already available through Trainer logs.
+    eval_loss = pred.metrics["eval_loss"] if "eval_loss" in pred.metrics else None
+
+    metrics = {"bleu": bleu_score, "rouge_l": rouge_l}
+    if eval_loss is not None:
+        metrics["eval_loss"] = eval_loss
+
+    logger.info(f"BLEU Score: {bleu_score}")
+    logger.info(f"ROUGE-L Score: {rouge_l}")
+    if eval_loss is not None:
+        logger.info(f"Evaluation Loss: {eval_loss}")
+
+    return metrics
+
 def main():
     # Log the start of the script
     logger.info("Starting training script")
@@ -386,7 +439,7 @@ def main():
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        compute_metrics=None,
+        compute_metrics=lambda pred: compute_metrics(pred, processor)
     )
 
     logger.info("Trainer initialized. Starting training...")
