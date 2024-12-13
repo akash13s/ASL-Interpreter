@@ -1,5 +1,5 @@
 import os
-
+import logging
 import av
 import numpy as np
 import pandas as pd
@@ -59,6 +59,27 @@ LORA_TARGET_MODULES = [
     "up_proj",
     "down_proj",
 ]
+
+# Set up logging for both Trainer and custom logs
+LOG_FILE = "./logs/training.log"
+os.makedirs("./logs", exist_ok=True)  # Ensure the logs directory exists
+
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
+# Capture Trainer logs from the Hugging Face `transformers` library
+transformers_logger = logging.getLogger("transformers")
+transformers_logger.setLevel(logging.INFO)  # Set level to INFO or DEBUG as needed
+
+# Add a file handler to the transformers logger
+file_handler = logging.FileHandler(LOG_FILE)
+file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+transformers_logger.addHandler(file_handler)
+
+logger = logging.getLogger(__name__)
 
 def read_video_pyav(container, indices):
     '''
@@ -220,7 +241,6 @@ class VideoDataset(Dataset):
             "labels": labels.squeeze(0)
         }
 
-
 def create_train_val_datasets(video_dir: str, csv_file: str, processor, num_frames: int = 16):
     """
     Creates training and validation datasets from a CSV file containing video annotations.
@@ -286,11 +306,12 @@ def get_quantization_config(use_qlora: bool, use_4bit: bool, use_8bit: bool, use
 
     return BitsAndBytesConfig(**quantization_config)
 
-
 def main():
+    # Log the start of the script
+    logger.info("Starting training script")
+
     # Set up directories
     os.makedirs(f"{OUTPUT_DIR}", exist_ok=True)
-    os.makedirs(f"{LOG_DIR}", exist_ok=True)
     os.makedirs(f"{CACHE_DIR}", exist_ok=True)
 
     # Set up device and processor
@@ -301,6 +322,8 @@ def main():
 
     processor.patch_size = 14  # Standard patch size for ViT-L
 
+    logger.info("Processor and device set up complete.")
+
     # Create train and validation datasets
     train_dataset, val_dataset = create_train_val_datasets(
         video_dir=VIDEO_DIR,
@@ -308,6 +331,9 @@ def main():
         processor=processor,
         num_frames=NUM_FRAMES
     )
+
+    logger.info(f"Training dataset size: {len(train_dataset)}")
+    logger.info(f"Validation dataset size: {len(val_dataset)}")
 
     # Initialize model with quantization
     model = LlavaNextVideoForConditionalGeneration.from_pretrained(
@@ -317,6 +343,8 @@ def main():
         cache_dir=CACHE_DIR,
         quantization_config=get_quantization_config(USE_QLORA, USE_4BIT, USE_8BIT, USE_DBL_QUANT)
     )
+
+    logger.info("Model loaded successfully.")
 
     # Prepare model for k-bit training and configure LoRA
     model = prepare_model_for_kbit_training(model)
@@ -329,6 +357,8 @@ def main():
         task_type=TaskType.CAUSAL_LM
     )
     model = get_peft_model(model, peft_config)
+
+    logger.info("LoRA configuration complete.")
 
     # Configure training arguments
     training_args = TrainingArguments(
@@ -361,9 +391,11 @@ def main():
         compute_metrics=None,
     )
 
+    logger.info("Trainer initialized. Starting training...")
+
     # Start training
     trainer.train()
-
+    logger.info("Training complete.")
 
 if __name__ == "__main__":
     main()
