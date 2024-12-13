@@ -66,7 +66,6 @@ LOG_FILE = "./logs/training.log"
 os.makedirs("./logs", exist_ok=True)  # Ensure the logs directory exists
 
 logging.basicConfig(
-    filename=LOG_FILE,
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
@@ -74,17 +73,11 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout),  # Also log to stdout
     ],
 )
-
-# Capture Trainer logs from the Hugging Face `transformers` library
-transformers_logger = logging.getLogger("transformers")
-transformers_logger.setLevel(logging.INFO)  # Set level to INFO or DEBUG as needed
-
-# Add a file handler to the transformers logger
-file_handler = logging.FileHandler(LOG_FILE)
-file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-transformers_logger.addHandler(file_handler)
-
 logger = logging.getLogger(__name__)
+
+# Capture Hugging Face Trainer logs
+transformers_logger = logging.getLogger("transformers")
+transformers_logger.setLevel(logging.INFO)
 
 def read_video_pyav(container, indices):
     '''
@@ -376,7 +369,7 @@ def main():
         weight_decay=WEIGHT_DECAY,
         fp16=True,
         logging_dir=LOG_DIR,
-        logging_steps=10,
+        logging_steps=1,
         save_strategy="epoch",
         evaluation_strategy="epoch",
         load_best_model_at_end=True,
