@@ -48,9 +48,9 @@ WEIGHT_DECAY = 0.05
 NUM_EPOCHS = 20
 
 # Quantization parameters
-USE_QLORA = False
+USE_QLORA = True
 USE_4BIT = False #Keep false if not using QLORA
-USE_8BIT = False #Keep false if not using QLORA
+USE_8BIT = True #Keep false if not using QLORA
 USE_DBL_QUANT = False #Keep false if not using QLORA
 
 # LoRA hyperparameters
@@ -374,6 +374,7 @@ def main():
     processor = AutoProcessor.from_pretrained(MODEL_ID)
     processor.tokenizer.padding_side = "right"
     processor.image_processor.do_rescale = False
+    processor.video_processor.do_rescale = False
 
     processor.patch_size = 14  # Standard patch size for ViT-L
 
@@ -398,6 +399,9 @@ def main():
         cache_dir=CACHE_DIR,
         quantization_config=get_quantization_config(USE_QLORA, USE_4BIT, USE_8BIT, USE_DBL_QUANT)
     )
+
+    # Disable `use_cache` in the model configuration
+    model.config.use_cache = False
 
     logger.info("Model loaded successfully.")
 
@@ -428,13 +432,14 @@ def main():
         logging_dir=LOG_DIR,
         logging_steps=1,
         save_strategy="epoch",
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
         remove_unused_columns=False,
         ddp_find_unused_parameters=True,
         dataloader_num_workers=0,
+        report_to="all"
     )
 
     # Initialize trainer without custom collator
