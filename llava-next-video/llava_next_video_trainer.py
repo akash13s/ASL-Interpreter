@@ -31,7 +31,7 @@ TRAIN_VAL_SPLIT = 0.8
 
 # Model constants
 BATCH_SIZE = 4
-MAX_LENGTH = 128  # Fixed sequence length for text
+MAX_LENGTH = 3500  # Fixed sequence length for text
 NUM_FRAMES = 16  # Fixed number of frames
 IMAGE_SIZE = 224  # Fixed image size
 
@@ -60,8 +60,6 @@ LORA_TARGET_MODULES = [
     "down_proj",
 ]
 
-VERBOSE = True
-
 def read_video_pyav(container, indices):
     '''
     Decode the video with PyAV decoder.
@@ -78,7 +76,7 @@ def read_video_pyav(container, indices):
 
     resize_transform = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.Resize((224, 224)),
+        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         transforms.ToTensor()
     ])
 
@@ -95,7 +93,6 @@ def read_video_pyav(container, indices):
             frames.append(resized_frame)
 
     return np.stack(frames)
-
 
 def get_frames(video_path: str, num_frames: int = 8) -> np.ndarray:
     """
@@ -131,7 +128,6 @@ def get_frames(video_path: str, num_frames: int = 8) -> np.ndarray:
 
     container.close()
     return frames
-
 
 class VideoDataset(Dataset):
     """
@@ -312,10 +308,6 @@ def main():
         processor=processor,
         num_frames=NUM_FRAMES
     )
-
-    if VERBOSE:
-        print(f"Training dataset size: {len(train_dataset)}")
-        print(f"Validation dataset size: {len(val_dataset)}")
 
     # Initialize model with quantization
     model = LlavaNextVideoForConditionalGeneration.from_pretrained(
