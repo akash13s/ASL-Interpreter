@@ -2,11 +2,11 @@
 #SBATCH --nodes=1                   # 1 node
 #SBATCH --ntasks-per-node=1          # 1 task per node
 #SBATCH --cpus-per-task=1            # 1 CPU per task for 1 GPU
-#SBATCH --time=24:00:00
+#SBATCH --time=1:00:00
 #SBATCH --mem=64GB
 #SBATCH --gres=gpu:1                 # Request 1 GPU per node
-#SBATCH --job-name=llava_next_video
-#SBATCH --output=llava_next_video.out
+#SBATCH --job-name=llava_next_video-test
+#SBATCH --output=llava_next_video-test.out
 #SBATCH --nice=0
 
 module purge
