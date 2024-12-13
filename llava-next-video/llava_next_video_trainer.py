@@ -26,7 +26,7 @@ CACHE_DIR = "./cache/"
 OUTPUT_DIR = "./output/"
 LOG_DIR = "./logs"
 
-DATASET_SIZE = 125
+DATASET_SIZE = 100
 TRAIN_VAL_SPLIT = 0.8
 
 # Model constants
