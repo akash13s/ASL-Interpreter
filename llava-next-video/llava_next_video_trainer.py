@@ -18,6 +18,8 @@ from transformers import (
 from nltk.translate.bleu_score import sentence_bleu
 from rouge_score import rouge_scorer
 
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 # Constants
 MODEL_ID = "llava-hf/LLaVA-NeXT-Video-7B-hf"
 MODEL_NAME = MODEL_ID.split("/")[-1]
@@ -358,6 +360,10 @@ def compute_metrics(pred, processor):
     return metrics
 
 def main():
+
+    torch.cuda.empty_cache()
+
+
     # Log the start of the script
     logger.info("Starting training script")
 
