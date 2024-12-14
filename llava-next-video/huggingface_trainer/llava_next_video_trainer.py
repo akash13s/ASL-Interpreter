@@ -33,7 +33,7 @@ CACHE_DIR = "./cache/"
 OUTPUT_DIR = "./output/"
 LOG_DIR = "./logs"
 
-DATASET_SIZE = 100
+DATASET_SIZE = 6250
 TRAIN_VAL_SPLIT = 0.8
 
 # Model constants
@@ -45,7 +45,7 @@ IMAGE_SIZE = 224  # Fixed image size
 # Training hyperparameters
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 0.05
-NUM_EPOCHS = 20
+NUM_EPOCHS = 10
 
 # Quantization parameters
 USE_QLORA = False
@@ -324,70 +324,75 @@ class SaveGeneratedTextsCallback(TrainerCallback):
         self.processor = processor
         self.eval_dataset = eval_dataset
         self.output_file = os.path.join(output_dir, "generated_texts.json")
-
-        # Initialize the JSON file
+        
+        # Initialize the JSON file if it doesn't exist
         if not os.path.exists(self.output_file):
             with open(self.output_file, 'w') as f:
-                f.write('[\n')
-
+                json.dump({"generated_texts": []}, f)
+    
     def on_evaluate(self, args, state, control, **kwargs):
         print(f"Saving generated texts during evaluation for epoch {state.epoch}...")
-
-        with open(self.output_file, 'a+') as f:
-            f.seek(0, os.SEEK_END)  # Go to the end of the file
-            if f.tell() > 2:  # Check if there are already entries (non-empty JSON array)
-                f.seek(-2, os.SEEK_END)  # Move back to overwrite the last `\n`
-                f.write(',\n')
-
-            results = []
-            for idx in range(len(self.eval_dataset)):
-                sample = self.eval_dataset[idx]
-
-                # Retrieve preprocessed inputs
-                input_ids = sample['input_ids'].unsqueeze(0).to(args.device)
-                attention_mask = sample['attention_mask'].unsqueeze(0).to(args.device)
-                pixel_values_videos = sample['pixel_values_videos'].unsqueeze(0).to(args.device)
-
-                # Generate predictions
-                inputs = {
-                    "input_ids": input_ids,
-                    "attention_mask": attention_mask,
-                    "pixel_values_videos": pixel_values_videos,
-                }
-                generated_ids = trainer.model.generate(
-                    **inputs,
-                    max_new_tokens=128,
-                    do_sample=True,
-                    top_p=0.9
-                )
-                generated_text = self.processor.tokenizer.batch_decode(
-                    generated_ids, skip_special_tokens=True
-                )[0]
-
-                # Clean the generated text
-                keyword = "ASSISTANT:"
-                if keyword in generated_text:
-                    generated_text = generated_text.split(keyword, 1)[1].strip()
-
-                # Append results
-                results.append({
-                    "epoch": state.epoch,
-                    "id": idx,
-                    "video_id": sample['video_id'],
-                    "generated": generated_text,
-                    "true": sample['true_sentence'],
-                })
-
-            # Write results to file
-            for idx, result in enumerate(results):
-                json.dump(result, f)
-                if idx < len(results) - 1:  # Add a comma for all but the last entry
-                    f.write(',\n')
-
+        
+        # Read existing results
+        with open(self.output_file, 'r') as f:
+            all_results = json.load(f)
+        
+        # Generate new results
+        new_results = []
+        for idx in range(len(self.eval_dataset)):
+            sample = self.eval_dataset[idx]
+            # Retrieve preprocessed inputs
+            input_ids = sample['input_ids'].unsqueeze(0).to(args.device)
+            attention_mask = sample['attention_mask'].unsqueeze(0).to(args.device)
+            pixel_values_videos = sample['pixel_values_videos'].unsqueeze(0).to(args.device)
+            labels = sample['labels'].unsqueeze(0).to(args.device)
+            
+            # Generate predictions
+            inputs = {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "pixel_values_videos": pixel_values_videos,
+            }
+            generated_ids = trainer.model.generate(
+                **inputs,
+                max_new_tokens=128,
+                do_sample=True,
+                top_p=0.9
+            )
+            generated_text = self.processor.tokenizer.batch_decode(
+                generated_ids, skip_special_tokens=True
+            )[0]
+            
+            # Clean the generated text
+            keyword = "ASSISTANT:"
+            if keyword in generated_text:
+                generated_text = generated_text.split(keyword, 1)[1].strip()
+            
+            # Decode labels (true text)
+            true_text = self.processor.tokenizer.decode(
+                labels[0][labels[0] != -100],
+                skip_special_tokens=True
+            )
+            
+            # Create result dictionary
+            result = {
+                "epoch": state.epoch,
+                "id": idx,
+                "video_id": sample['video_id'],
+                "generated": generated_text,
+                "true": true_text
+            }
+            new_results.append(result)
+        
+        # Append new results to existing ones
+        all_results["generated_texts"].extend(new_results)
+        
+        # Write back all results
+        with open(self.output_file, 'w') as f:
+            json.dump(all_results, f, indent=4)
+    
     def on_train_end(self, args, state, control, **kwargs):
-        # Close JSON array
-        with open(self.output_file, 'a') as f:
-            f.write('\n]')
+        pass
 
 def main():
     # Log the start of the script
