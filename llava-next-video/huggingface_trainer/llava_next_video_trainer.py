@@ -163,12 +163,15 @@ class VideoDataset(Dataset):
         annotations (pd.DataFrame): DataFrame containing video metadata and text annotations.
         processor: Processor for tokenizing text and preparing video frames.
         num_frames (int): Number of frames to extract from each video. Default is 16.
+        mode (str): Mode of the dataset, either "train" or "eval". Default is "train".
+                    If "train", the true sentence is included in the prompt. Otherwise, it is excluded.
     """
-    def __init__(self, video_dir: str, annotations: pd.DataFrame, processor, num_frames: int = 16):
+    def __init__(self, video_dir: str, annotations: pd.DataFrame, processor, num_frames: int = 16, mode: str = "train"):
         self.video_dir = video_dir
         self.annotations = annotations
         self.num_frames = num_frames
         self.processor = processor
+        self.mode = mode
         self.system_prompt = ("Analyze the American Sign Language (ASL) signs in this video and "
                               "translate them into clear, natural English. Consider the sequence of "
                               "signs as a complete message, and provide an accurate translation that "
@@ -211,7 +214,12 @@ class VideoDataset(Dataset):
 
         # Get video frames using the provided functions
         frames = get_frames(video_path, self.num_frames)
-        prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT: {sentence}"
+
+        # Prepare the prompt
+        if self.mode == "train":
+            prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT: {sentence}"
+        else:
+            prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT:"  # Exclude true sentence
 
         # Process the frames and text with fixed sizes
         inputs = self.processor(
@@ -243,6 +251,7 @@ class VideoDataset(Dataset):
             "attention_mask": inputs["attention_mask"].squeeze(0),
             "pixel_values_videos": inputs["pixel_values_videos"].squeeze(0),
             "labels": labels.squeeze(0),
+            "true_sentence": sentence,
             "video_id": video_id
         }
 
@@ -273,8 +282,8 @@ def create_train_val_datasets(video_dir: str, csv_file: str, processor, num_fram
     val_df = shuffled_df.iloc[train_size:]
 
     # Create dataset objects
-    train_dataset = VideoDataset(video_dir, train_df, processor, num_frames)
-    val_dataset = VideoDataset(video_dir, val_df, processor, num_frames)
+    train_dataset = VideoDataset(video_dir, train_df, processor, num_frames, "train")
+    val_dataset = VideoDataset(video_dir, val_df, processor, num_frames, "eval")
 
     return train_dataset, val_dataset
 
@@ -338,7 +347,6 @@ class SaveGeneratedTextsCallback(TrainerCallback):
                 input_ids = sample['input_ids'].unsqueeze(0).to(args.device)
                 attention_mask = sample['attention_mask'].unsqueeze(0).to(args.device)
                 pixel_values_videos = sample['pixel_values_videos'].unsqueeze(0).to(args.device)
-                labels = sample['labels'].unsqueeze(0).to(args.device)
 
                 # Generate predictions
                 inputs = {
@@ -361,19 +369,13 @@ class SaveGeneratedTextsCallback(TrainerCallback):
                 if keyword in generated_text:
                     generated_text = generated_text.split(keyword, 1)[1].strip()
 
-                # Decode labels (true text)
-                true_text = self.processor.tokenizer.decode(
-                    labels[0][labels[0] != -100],
-                    skip_special_tokens=True
-                )
-
                 # Append results
                 results.append({
                     "epoch": state.epoch,
                     "id": idx,
                     "video_id": sample['video_id'],
                     "generated": generated_text,
-                    "true": true_text,
+                    "true": sample['true_sentence'],
                 })
 
             # Write results to file
