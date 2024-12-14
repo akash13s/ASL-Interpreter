@@ -1,5 +1,4 @@
 import os
-import re
 import json
 import pandas as pd
 from rouge_score import rouge_scorer
@@ -27,21 +26,20 @@ class EvaluationMetrics:
 
     def _load_and_fix_json(self):
         """
-        Load and fix JSON formatting if required.
+        Load and parse the JSON file, accessing the `generated_texts` field.
 
         Returns:
             list: Parsed JSON data as a list of dictionaries.
         """
         print(f"Loading and checking JSON file: {self.json_file_path}")
         with open(self.json_file_path, 'r') as file:
-            json_string = file.read()
+            json_data = json.load(file)
 
-        # Fix missing commas between objects
-        fixed_json_string = re.sub(r'\}\s*\{', '},{', json_string)
-        print("Fixed JSON formatting if necessary.")
-
-        # Parse JSON data
-        data = json.loads(fixed_json_string)
+        # Ensure the key `generated_texts` is present and contains data
+        if "generated_texts" not in json_data or not isinstance(json_data["generated_texts"], list):
+            raise ValueError("The JSON file does not contain a valid 'generated_texts' field.")
+        
+        data = json_data["generated_texts"]
         print(f"Loaded {len(data)} records from JSON file.")
         return data
 
@@ -70,7 +68,7 @@ class EvaluationMetrics:
             smoothing_function=smoothing_function
         )
 
-        print(f"Computed metrics for ID: {sample['id']}")
+        print(f"Computed metrics for ID: {sample['id']} (Epoch: {sample['epoch']})")
         return {
             "epoch": sample["epoch"],
             "rouge1": rouge_scores['rouge1'].fmeasure,
