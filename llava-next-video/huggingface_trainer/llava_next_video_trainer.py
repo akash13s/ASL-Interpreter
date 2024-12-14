@@ -216,7 +216,7 @@ class VideoDataset(Dataset):
         frames = get_frames(video_path, self.num_frames)
 
         # Prepare the prompt
-        if self.mode == "train":
+        if self.mode == "train" or self.mode == "eval":
             prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT: {sentence}"
         else:
             prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT:"  # Exclude true sentence
@@ -284,8 +284,9 @@ def create_train_val_datasets(video_dir: str, csv_file: str, processor, num_fram
     # Create dataset objects
     train_dataset = VideoDataset(video_dir, train_df, processor, num_frames, "train")
     val_dataset = VideoDataset(video_dir, val_df, processor, num_frames, "eval")
+    test_dataset = VideoDataset(video_dir, val_df, processor, num_frames, "infer")
 
-    return train_dataset, val_dataset
+    return train_dataset, val_dataset, test_dataset
 
 def get_quantization_config(use_qlora: bool, use_4bit: bool, use_8bit: bool, use_double_quant: bool):
     """
@@ -345,7 +346,6 @@ class SaveGeneratedTextsCallback(TrainerCallback):
             input_ids = sample['input_ids'].unsqueeze(0).to(args.device)
             attention_mask = sample['attention_mask'].unsqueeze(0).to(args.device)
             pixel_values_videos = sample['pixel_values_videos'].unsqueeze(0).to(args.device)
-            labels = sample['labels'].unsqueeze(0).to(args.device)
             
             # Generate predictions
             inputs = {
@@ -367,12 +367,6 @@ class SaveGeneratedTextsCallback(TrainerCallback):
             keyword = "ASSISTANT:"
             if keyword in generated_text:
                 generated_text = generated_text.split(keyword, 1)[1].strip()
-            
-            # Decode labels (true text)
-            true_text = self.processor.tokenizer.decode(
-                labels[0][labels[0] != -100],
-                skip_special_tokens=True
-            )
             
             # Create result dictionary
             result = {
@@ -413,7 +407,7 @@ def main():
     logger.info("Processor and device set up complete.")
 
     # Create train and validation datasets
-    train_dataset, val_dataset = create_train_val_datasets(
+    train_dataset, val_dataset, test_dataset = create_train_val_datasets(
         video_dir=VIDEO_DIR,
         csv_file=CSV_FILE,
         processor=processor,
@@ -486,7 +480,7 @@ def main():
     # Add callback to save generated texts
     callback = SaveGeneratedTextsCallback(
         processor=processor,
-        eval_dataset=val_dataset,
+        eval_dataset=test_dataset,
         output_dir=OUTPUT_DIR
     )
 
