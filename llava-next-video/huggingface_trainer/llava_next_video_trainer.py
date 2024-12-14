@@ -5,6 +5,7 @@ import av
 import numpy as np
 import pandas as pd
 import torch
+import json
 from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -13,10 +14,9 @@ from transformers import (
     BitsAndBytesConfig,
     LlavaNextVideoForConditionalGeneration,
     Trainer,
-    TrainingArguments
+    TrainingArguments,
+    TrainerCallback
 )
-from nltk.translate.bleu_score import sentence_bleu
-from rouge_score import rouge_scorer
 
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
@@ -308,56 +308,72 @@ def get_quantization_config(use_qlora: bool, use_4bit: bool, use_8bit: bool, use
 
     return BitsAndBytesConfig(**quantization_config)
 
-def compute_metrics(pred, processor):
-    """
-    Compute BLEU, ROUGE-L, and loss for predictions.
+class SaveGeneratedTextsCallback(TrainerCallback):
+    def __init__(self, processor, eval_dataset, output_dir):
+        self.processor = processor
+        self.eval_dataset = eval_dataset
+        self.output_file = os.path.join(output_dir, "generated_texts.json")
 
-    Args:
-        pred: Prediction object from the Trainer.
+        # Initialize the JSON file
+        if not os.path.exists(self.output_file):
+            with open(self.output_file, 'w') as f:
+                f.write('[\n')
 
-    Returns:
-        dict: Dictionary containing BLEU, ROUGE-L scores, and loss.
-    """
-    logger.info("Evaluating model after epoch...")
-    predictions = pred.predictions
-    labels = pred.label_ids
+    def on_evaluate(self, args, state, control, **kwargs):
+        print("Saving generated texts during evaluation...")
 
-    # Decode predictions and labels
-    decoded_preds = processor.tokenizer.batch_decode(predictions, skip_special_tokens=True)
-    decoded_labels = processor.tokenizer.batch_decode(labels, skip_special_tokens=True)
+        with open(self.output_file, 'a') as f:
+            results = []
+            
+            for idx in range(len(self.eval_dataset)):
+                sample = self.eval_dataset[idx]
 
-    # Strip whitespaces
-    decoded_preds = [pred.strip() for pred in decoded_preds]
-    decoded_labels = [label.strip() for label in decoded_labels]
+                # Retrieve preprocessed inputs
+                input_ids = sample['input_ids'].unsqueeze(0).to(args.device)
+                attention_mask = sample['attention_mask'].unsqueeze(0).to(args.device)
+                pixel_values_videos = sample['pixel_values_videos'].unsqueeze(0).to(args.device)
+                labels = sample['labels'].unsqueeze(0).to(args.device)
 
-    # Compute BLEU scores
-    bleu_scores = [
-        sentence_bleu([label.split()], pred.split())  # Compare individual sentences
-        for pred, label in zip(decoded_preds, decoded_labels)
-    ]
-    bleu_score = np.mean(bleu_scores)
+                # Generate predictions
+                inputs = {
+                    "input_ids": input_ids,
+                    "attention_mask": attention_mask,
+                    "pixel_values_videos": pixel_values_videos,
+                }
+                generated_ids = trainer.model.generate(
+                    **inputs,
+                    max_new_tokens=128,
+                    do_sample=True,
+                    top_p=0.9
+                )
+                generated_text = self.processor.tokenizer.batch_decode(
+                    generated_ids, skip_special_tokens=True
+                )[0]
 
-    # Compute ROUGE scores
-    rouge = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
-    rouge_scores = [
-        rouge.score(label, pred) for pred, label in zip(decoded_preds, decoded_labels)
-    ]
-    rouge_l = np.mean([score['rougeL'].fmeasure for score in rouge_scores])
+                # Decode labels (true text)
+                true_text = self.processor.tokenizer.decode(
+                    labels[0][labels[0] != -100],
+                    skip_special_tokens=True
+                )
 
-    # Include loss (Trainer logs loss automatically, so this is an example placeholder)
-    # If you want loss logged, it's already available through Trainer logs.
-    eval_loss = pred.metrics["eval_loss"] if "eval_loss" in pred.metrics else None
+                # Append results
+                results.append({
+                    "id": idx,
+                    "video_id": sample['video_id'],
+                    "generated": generated_text,
+                    "true": true_text,
+                })
 
-    metrics = {"bleu": bleu_score, "rouge_l": rouge_l}
-    if eval_loss is not None:
-        metrics["eval_loss"] = eval_loss
+            # Write results to file
+            for idx, result in enumerate(results):
+                if f.tell() > 1:  # Add comma if the file is not empty
+                    f.write(',\n')
+                json.dump(result, f)
 
-    logger.info(f"BLEU Score: {bleu_score}")
-    logger.info(f"ROUGE-L Score: {rouge_l}")
-    if eval_loss is not None:
-        logger.info(f"Evaluation Loss: {eval_loss}")
-
-    return metrics
+    def on_train_end(self, args, state, control, **kwargs):
+        # Close JSON array
+        with open(self.output_file, 'a') as f:
+            f.write('\n]')
 
 def main():
     # Log the start of the script
@@ -446,8 +462,17 @@ def main():
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        compute_metrics=lambda pred: compute_metrics(pred, processor)
+        compute_metrics=None
     )
+
+    # Add callback to save generated texts
+    callback = SaveGeneratedTextsCallback(
+        processor=processor,
+        eval_dataset=val_dataset,
+        output_dir=OUTPUT_DIR
+    )
+
+    trainer.add_callback(callback)
 
     logger.info("Trainer initialized. Starting training...")
 
