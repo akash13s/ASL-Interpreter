@@ -491,5 +491,17 @@ def main():
     trainer.train()
     logger.info("Training complete.")
 
+    # Save the final model and processor
+    final_model_path = os.path.join(OUTPUT_DIR, "model")
+    os.makedirs(final_model_path, exist_ok=True)
+
+    # Save the trained model
+    trainer.save_model(final_model_path)
+
+    # Save the processor
+    processor.save_pretrained(final_model_path)
+
+    logger.info(f"Model and processor saved to {final_model_path}")
+
 if __name__ == "__main__":
     main()
