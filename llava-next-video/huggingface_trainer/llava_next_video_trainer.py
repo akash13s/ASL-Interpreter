@@ -199,6 +199,7 @@ class VideoDataset(Dataset):
                 - attention_mask: Attention mask for text input.
                 - pixel_values_videos: Processed video frames as tensors.
                 - labels: Labels for supervised learning.
+                - video_id: The ID of the video (for later use in generation and evaluation).
         """
         row = self.annotations.iloc[idx]
         video_id = str(row['SENTENCE_NAME']).strip()
@@ -241,7 +242,8 @@ class VideoDataset(Dataset):
             "input_ids": inputs["input_ids"].squeeze(0),
             "attention_mask": inputs["attention_mask"].squeeze(0),
             "pixel_values_videos": inputs["pixel_values_videos"].squeeze(0),
-            "labels": labels.squeeze(0)
+            "labels": labels.squeeze(0),
+            "video_id": video_id
         }
 
 def create_train_val_datasets(video_dir: str, csv_file: str, processor, num_frames: int = 16):
@@ -397,7 +399,6 @@ def main():
     processor.tokenizer.padding_side = "right"
     processor.image_processor.do_rescale = False
     processor.video_processor.do_rescale = False
-
     processor.patch_size = 14  # Standard patch size for ViT-L
 
     logger.info("Processor and device set up complete.")
