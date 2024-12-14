@@ -1,12 +1,11 @@
-import json
-import logging
 import os
+import logging
 import sys
-
 import av
 import numpy as np
 import pandas as pd
 import torch
+import json
 from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -29,12 +28,12 @@ MODEL_NAME = MODEL_ID.split("/")[-1]
 
 # File/directory
 VIDEO_DIR = "/scratch/as18464/raw_videos"
-CSV_FILE = "../data/valid_clips.csv"
+CSV_FILE = "../../data/valid_clips.csv"
 CACHE_DIR = "./cache/"
 OUTPUT_DIR = "./output/"
 LOG_DIR = "./logs"
 
-DATASET_SIZE = 100
+DATASET_SIZE = 6250
 TRAIN_VAL_SPLIT = 0.8
 
 # Model constants
@@ -46,7 +45,7 @@ IMAGE_SIZE = 224  # Fixed image size
 # Training hyperparameters
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 0.05
-NUM_EPOCHS = 20
+NUM_EPOCHS = 10
 
 # Quantization parameters
 USE_QLORA = False
@@ -88,14 +87,14 @@ transformers_logger.setLevel(logging.INFO)
 
 
 def read_video_pyav(container, indices):
-    """
+    '''
     Decode the video with PyAV decoder.
     Args:
         container (`av.container.input.InputContainer`): PyAV container.
         indices (`List[int]`): List of frame indices to decode.
     Returns:
         result (np.ndarray): np array of decoded frames of shape (num_frames, height, width, 3).
-    """
+    '''
     frames = []
     container.seek(0)
     start_index = indices[0]
@@ -167,13 +166,16 @@ class VideoDataset(Dataset):
         annotations (pd.DataFrame): DataFrame containing video metadata and text annotations.
         processor: Processor for tokenizing text and preparing video frames.
         num_frames (int): Number of frames to extract from each video. Default is 16.
+        mode (str): Mode of the dataset, either "train" or "eval". Default is "train".
+                    If "train", the true sentence is included in the prompt. Otherwise, it is excluded.
     """
 
-    def __init__(self, video_dir: str, annotations: pd.DataFrame, processor, num_frames: int = 16):
+    def __init__(self, video_dir: str, annotations: pd.DataFrame, processor, num_frames: int = 16, mode: str = "train"):
         self.video_dir = video_dir
         self.annotations = annotations
         self.num_frames = num_frames
         self.processor = processor
+        self.mode = mode
         self.system_prompt = ("Analyze the American Sign Language (ASL) signs in this video and "
                               "translate them into clear, natural English. Consider the sequence of "
                               "signs as a complete message, and provide an accurate translation that "
@@ -185,7 +187,7 @@ class VideoDataset(Dataset):
     def __len__(self) -> int:
         """
         Returns the number of samples in the dataset.
-        
+
         Returns:
             int: The length of the annotations DataFrame.
         """
@@ -197,13 +199,14 @@ class VideoDataset(Dataset):
 
         Args:
             idx (int): Index of the sample to retrieve.
-        
+
         Returns:
             dict: Dictionary containing processed input tensors for the model:
                 - input_ids: Encoded text input IDs.
                 - attention_mask: Attention mask for text input.
                 - pixel_values_videos: Processed video frames as tensors.
                 - labels: Labels for supervised learning.
+                - video_id: The ID of the video (for later use in generation and evaluation).
         """
         row = self.annotations.iloc[idx]
         video_id = str(row['SENTENCE_NAME']).strip()
@@ -215,7 +218,12 @@ class VideoDataset(Dataset):
 
         # Get video frames using the provided functions
         frames = get_frames(video_path, self.num_frames)
-        prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT: {sentence}"
+
+        # Prepare the prompt
+        if self.mode == "train" or self.mode == "eval":
+            prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT: {sentence}"
+        else:
+            prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT:"  # Exclude true sentence
 
         # Process the frames and text with fixed sizes
         inputs = self.processor(
@@ -247,6 +255,7 @@ class VideoDataset(Dataset):
             "attention_mask": inputs["attention_mask"].squeeze(0),
             "pixel_values_videos": inputs["pixel_values_videos"].squeeze(0),
             "labels": labels.squeeze(0),
+            "true_sentence": sentence,
             "video_id": video_id
         }
 
@@ -254,13 +263,13 @@ class VideoDataset(Dataset):
 def create_train_val_datasets(video_dir: str, csv_file: str, processor, num_frames: int = 16):
     """
     Creates training and validation datasets from a CSV file containing video annotations.
-    
+
     Args:
         video_dir (str): Path to the directory containing video files.
         csv_file (str): Path to the CSV file containing video metadata and annotations.
         processor: Preprocessor for tokenizing text and preparing video inputs.
         num_frames (int): Number of frames to extract from each video. Default is 16.
-    
+
     Returns:
         Tuple[Dataset, Dataset]: A tuple containing the training and validation datasets.
     """
@@ -278,22 +287,23 @@ def create_train_val_datasets(video_dir: str, csv_file: str, processor, num_fram
     val_df = shuffled_df.iloc[train_size:]
 
     # Create dataset objects
-    train_dataset = VideoDataset(video_dir, train_df, processor, num_frames)
-    val_dataset = VideoDataset(video_dir, val_df, processor, num_frames)
+    train_dataset = VideoDataset(video_dir, train_df, processor, num_frames, "train")
+    val_dataset = VideoDataset(video_dir, val_df, processor, num_frames, "eval")
+    test_dataset = VideoDataset(video_dir, val_df, processor, num_frames, "infer")
 
-    return train_dataset, val_dataset
+    return train_dataset, val_dataset, test_dataset
 
 
 def get_quantization_config(use_qlora: bool, use_4bit: bool, use_8bit: bool, use_double_quant: bool):
     """
     Generate the appropriate BitsAndBytesConfig for quantization.
-    
+
     Args:
         use_qlora (bool): Whether QLoRA-specific settings should be used.
         use_4bit (bool): Enable 4-bit quantization.
         use_8bit (bool): Enable 8-bit quantization.
         use_double_quant (bool): Enable double quantization (QLoRA-specific).
-    
+
     Returns:
         BitsAndBytesConfig: Configured object for the quantization setup.
     """
@@ -343,7 +353,6 @@ class SaveGeneratedTextsCallback(TrainerCallback):
             input_ids = sample['input_ids'].unsqueeze(0).to(args.device)
             attention_mask = sample['attention_mask'].unsqueeze(0).to(args.device)
             pixel_values_videos = sample['pixel_values_videos'].unsqueeze(0).to(args.device)
-            labels = sample['labels'].unsqueeze(0).to(args.device)
 
             # Generate predictions
             inputs = {
@@ -351,13 +360,10 @@ class SaveGeneratedTextsCallback(TrainerCallback):
                 "attention_mask": attention_mask,
                 "pixel_values_videos": pixel_values_videos,
             }
-
-            model = kwargs['model']
-            generated_ids = model.generate(
+            generated_ids = trainer.model.generate(
                 **inputs,
                 max_new_tokens=128,
-                do_sample=True,
-                top_p=0.9
+                do_sample=False
             )
             generated_text = self.processor.tokenizer.batch_decode(
                 generated_ids, skip_special_tokens=True
@@ -368,19 +374,13 @@ class SaveGeneratedTextsCallback(TrainerCallback):
             if keyword in generated_text:
                 generated_text = generated_text.split(keyword, 1)[1].strip()
 
-            # Decode labels (true text)
-            true_text = self.processor.tokenizer.decode(
-                labels[0][labels[0] != -100],
-                skip_special_tokens=True
-            )
-
             # Create result dictionary
             result = {
                 "epoch": state.epoch,
                 "id": idx,
                 "video_id": sample['video_id'],
                 "generated": generated_text,
-                "true": true_text
+                "true": sample['true_sentence']
             }
             new_results.append(result)
 
@@ -409,13 +409,12 @@ def main():
     processor.tokenizer.padding_side = "right"
     processor.image_processor.do_rescale = False
     processor.video_processor.do_rescale = False
-
     processor.patch_size = 14  # Standard patch size for ViT-L
 
     logger.info("Processor and device set up complete.")
 
     # Create train and validation datasets
-    train_dataset, val_dataset = create_train_val_datasets(
+    train_dataset, val_dataset, test_dataset = create_train_val_datasets(
         video_dir=VIDEO_DIR,
         csv_file=CSV_FILE,
         processor=processor,
@@ -488,7 +487,7 @@ def main():
     # Add callback to save generated texts
     callback = SaveGeneratedTextsCallback(
         processor=processor,
-        eval_dataset=val_dataset,
+        eval_dataset=test_dataset,
         output_dir=OUTPUT_DIR
     )
 
