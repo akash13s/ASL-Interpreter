@@ -380,7 +380,7 @@ class SaveGeneratedTextsCallback(TrainerCallback):
                 "id": idx,
                 "video_id": sample['video_id'],
                 "generated": generated_text,
-                "true": true_text
+                "true": sample['true_sentence']
             }
             new_results.append(result)
         
