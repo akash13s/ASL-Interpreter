@@ -29,7 +29,7 @@ MODEL_NAME = MODEL_ID.split("/")[-1]
 
 # File/directory
 VIDEO_DIR = "/scratch/as18464/raw_videos"
-CSV_FILE = "../../data/valid_clips.csv"
+CSV_FILE = "../data/valid_clips.csv"
 CACHE_DIR = "./cache/"
 OUTPUT_DIR = "./output/"
 LOG_DIR = "./logs"
@@ -375,11 +375,12 @@ class SaveGeneratedTextsCallback(TrainerCallback):
                     skip_special_tokens=True
                 )
 
+                video_id = str(sample['SENTENCE_NAME']).strip()
                 # Append results
                 results.append({
                     "epoch": state.epoch,
                     "id": idx,
-                    "video_id": sample['video_id'],
+                    "video_id": video_id,
                     "generated": generated_text,
                     "true": true_text,
                 })
