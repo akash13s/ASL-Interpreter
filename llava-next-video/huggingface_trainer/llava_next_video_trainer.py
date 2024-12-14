@@ -356,8 +356,7 @@ class SaveGeneratedTextsCallback(TrainerCallback):
             generated_ids = trainer.model.generate(
                 **inputs,
                 max_new_tokens=128,
-                do_sample=True,
-                top_p=0.9
+                do_sample=False
             )
             generated_text = self.processor.tokenizer.batch_decode(
                 generated_ids, skip_special_tokens=True
