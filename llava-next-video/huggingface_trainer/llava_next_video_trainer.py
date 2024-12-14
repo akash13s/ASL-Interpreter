@@ -246,7 +246,8 @@ class VideoDataset(Dataset):
             "input_ids": inputs["input_ids"].squeeze(0),
             "attention_mask": inputs["attention_mask"].squeeze(0),
             "pixel_values_videos": inputs["pixel_values_videos"].squeeze(0),
-            "labels": labels.squeeze(0)
+            "labels": labels.squeeze(0),
+            "video_id": video_id
         }
 
 
