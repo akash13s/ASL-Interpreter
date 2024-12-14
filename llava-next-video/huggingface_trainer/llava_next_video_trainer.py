@@ -1,11 +1,12 @@
-import os
+import json
 import logging
+import os
 import sys
+
 import av
 import numpy as np
 import pandas as pd
 import torch
-import json
 from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -28,12 +29,12 @@ MODEL_NAME = MODEL_ID.split("/")[-1]
 
 # File/directory
 VIDEO_DIR = "/scratch/as18464/raw_videos"
-CSV_FILE = "../../data/valid_clips.csv"
+CSV_FILE = "../data/valid_clips.csv"
 CACHE_DIR = "./cache/"
 OUTPUT_DIR = "./output/"
 LOG_DIR = "./logs"
 
-DATASET_SIZE = 6250
+DATASET_SIZE = 100
 TRAIN_VAL_SPLIT = 0.8
 
 # Model constants
@@ -87,14 +88,14 @@ transformers_logger.setLevel(logging.INFO)
 
 
 def read_video_pyav(container, indices):
-    '''
+    """
     Decode the video with PyAV decoder.
     Args:
         container (`av.container.input.InputContainer`): PyAV container.
         indices (`List[int]`): List of frame indices to decode.
     Returns:
         result (np.ndarray): np array of decoded frames of shape (num_frames, height, width, 3).
-    '''
+    """
     frames = []
     container.seek(0)
     start_index = indices[0]
@@ -360,7 +361,9 @@ class SaveGeneratedTextsCallback(TrainerCallback):
                 "attention_mask": attention_mask,
                 "pixel_values_videos": pixel_values_videos,
             }
-            generated_ids = trainer.model.generate(
+
+            model = kwargs["model"]
+            generated_ids = model.generate(
                 **inputs,
                 max_new_tokens=128,
                 do_sample=False
@@ -404,7 +407,6 @@ def main():
     os.makedirs(f"{CACHE_DIR}", exist_ok=True)
 
     # Set up device and processor
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     processor = AutoProcessor.from_pretrained(MODEL_ID)
     processor.tokenizer.padding_side = "right"
     processor.image_processor.do_rescale = False
