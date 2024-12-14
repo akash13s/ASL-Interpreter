@@ -320,11 +320,15 @@ class SaveGeneratedTextsCallback(TrainerCallback):
                 f.write('[\n')
 
     def on_evaluate(self, args, state, control, **kwargs):
-        print("Saving generated texts during evaluation...")
+        print(f"Saving generated texts during evaluation for epoch {state.epoch}...")
 
-        with open(self.output_file, 'a') as f:
+        with open(self.output_file, 'a+') as f:
+            f.seek(0, os.SEEK_END)  # Go to the end of the file
+            if f.tell() > 2:  # Check if there are already entries (non-empty JSON array)
+                f.seek(-2, os.SEEK_END)  # Move back to overwrite the last `\n`
+                f.write(',\n')
+
             results = []
-            
             for idx in range(len(self.eval_dataset)):
                 sample = self.eval_dataset[idx]
 
@@ -350,6 +354,11 @@ class SaveGeneratedTextsCallback(TrainerCallback):
                     generated_ids, skip_special_tokens=True
                 )[0]
 
+                # Clean the generated text
+                keyword = "ASSISTANT:"
+                if keyword in generated_text:
+                    generated_text = generated_text.split(keyword, 1)[1].strip()
+
                 # Decode labels (true text)
                 true_text = self.processor.tokenizer.decode(
                     labels[0][labels[0] != -100],
@@ -367,9 +376,9 @@ class SaveGeneratedTextsCallback(TrainerCallback):
 
             # Write results to file
             for idx, result in enumerate(results):
-                if f.tell() > 1:  # Add comma if the file is not empty
-                    f.write(',\n')
                 json.dump(result, f)
+                if idx < len(results) - 1:  # Add a comma for all but the last entry
+                    f.write(',\n')
 
     def on_train_end(self, args, state, control, **kwargs):
         # Close JSON array

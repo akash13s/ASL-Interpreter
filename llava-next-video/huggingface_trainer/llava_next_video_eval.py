@@ -45,24 +45,6 @@ class EvaluationMetrics:
         print(f"Loaded {len(data)} records from JSON file.")
         return data
 
-    def clean_generated_field(self, keyword="Answer:"):
-        """
-        Clean the "generated" field by removing everything before the given keyword.
-
-        Args:
-            keyword (str): Keyword to use as the split point for cleaning.
-        """
-        print("Cleaning 'generated' fields in the data...")
-        cleaned_count = 0
-        for item in self.data:
-            if "generated" in item:
-                generated_text = item["generated"]
-                if keyword in generated_text:
-                    cleaned_text = generated_text.split(keyword, 1)[1]
-                    item["generated"] = cleaned_text.strip()
-                    cleaned_count += 1
-        print(f"Cleaned {cleaned_count} 'generated' fields.")
-
     def compute_metrics(self, sample):
         """
         Compute ROUGE and BLEU metrics for a single sample.
@@ -106,9 +88,6 @@ class EvaluationMetrics:
         """
         print("Starting evaluation process...")
         
-        # Clean the generated field
-        self.clean_generated_field()
-
         # Compute metrics for each sample
         print("Computing metrics for each sample...")
         metric_results = [self.compute_metrics(sample) for sample in self.data]
