@@ -91,7 +91,6 @@ class EvaluationMetrics:
         print(f"Computed metrics for ID: {sample['id']}")
         return {
             "epoch": sample["epoch"],
-            "id": sample["id"],
             "rouge1": rouge_scores['rouge1'].fmeasure,
             "rouge2": rouge_scores['rouge2'].fmeasure,
             "rougeL": rouge_scores['rougeL'].fmeasure,
