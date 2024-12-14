@@ -1,11 +1,12 @@
-import os
+import json
 import logging
+import os
 import sys
+
 import av
 import numpy as np
 import pandas as pd
 import torch
-import json
 from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -49,9 +50,9 @@ NUM_EPOCHS = 20
 
 # Quantization parameters
 USE_QLORA = False
-USE_4BIT = False #Keep false if not using QLORA
-USE_8BIT = False #Keep false if not using QLORA
-USE_DBL_QUANT = False #Keep false if not using QLORA
+USE_4BIT = False  # Keep false if not using QLORA
+USE_8BIT = False  # Keep false if not using QLORA
+USE_DBL_QUANT = False  # Keep false if not using QLORA
 
 # LoRA hyperparameters
 LORA_R = 8
@@ -85,15 +86,16 @@ logger = logging.getLogger(__name__)
 transformers_logger = logging.getLogger("transformers")
 transformers_logger.setLevel(logging.INFO)
 
+
 def read_video_pyav(container, indices):
-    '''
+    """
     Decode the video with PyAV decoder.
     Args:
         container (`av.container.input.InputContainer`): PyAV container.
         indices (`List[int]`): List of frame indices to decode.
     Returns:
         result (np.ndarray): np array of decoded frames of shape (num_frames, height, width, 3).
-    '''
+    """
     frames = []
     container.seek(0)
     start_index = indices[0]
@@ -118,6 +120,7 @@ def read_video_pyav(container, indices):
             frames.append(resized_frame)
 
     return np.stack(frames)
+
 
 def get_frames(video_path: str, num_frames: int = 8) -> np.ndarray:
     """
@@ -153,6 +156,7 @@ def get_frames(video_path: str, num_frames: int = 8) -> np.ndarray:
     container.close()
     return frames
 
+
 class VideoDataset(Dataset):
     """
     Custom Dataset for handling video data and corresponding text annotations.
@@ -164,6 +168,7 @@ class VideoDataset(Dataset):
         processor: Processor for tokenizing text and preparing video frames.
         num_frames (int): Number of frames to extract from each video. Default is 16.
     """
+
     def __init__(self, video_dir: str, annotations: pd.DataFrame, processor, num_frames: int = 16):
         self.video_dir = video_dir
         self.annotations = annotations
@@ -244,6 +249,7 @@ class VideoDataset(Dataset):
             "labels": labels.squeeze(0)
         }
 
+
 def create_train_val_datasets(video_dir: str, csv_file: str, processor, num_frames: int = 16):
     """
     Creates training and validation datasets from a CSV file containing video annotations.
@@ -276,6 +282,7 @@ def create_train_val_datasets(video_dir: str, csv_file: str, processor, num_fram
 
     return train_dataset, val_dataset
 
+
 def get_quantization_config(use_qlora: bool, use_4bit: bool, use_8bit: bool, use_double_quant: bool):
     """
     Generate the appropriate BitsAndBytesConfig for quantization.
@@ -307,6 +314,7 @@ def get_quantization_config(use_qlora: bool, use_4bit: bool, use_8bit: bool, use
         })
 
     return BitsAndBytesConfig(**quantization_config)
+
 
 class SaveGeneratedTextsCallback(TrainerCallback):
     def __init__(self, processor, eval_dataset, output_dir):
@@ -344,7 +352,9 @@ class SaveGeneratedTextsCallback(TrainerCallback):
                     "attention_mask": attention_mask,
                     "pixel_values_videos": pixel_values_videos,
                 }
-                generated_ids = trainer.model.generate(
+
+                model = kwargs["model"]
+                generated_ids = model.generate(
                     **inputs,
                     max_new_tokens=128,
                     do_sample=True,
@@ -384,6 +394,7 @@ class SaveGeneratedTextsCallback(TrainerCallback):
         # Close JSON array
         with open(self.output_file, 'a') as f:
             f.write('\n]')
+
 
 def main():
     # Log the start of the script
@@ -489,6 +500,7 @@ def main():
     # Start training
     trainer.train()
     logger.info("Training complete.")
+
 
 if __name__ == "__main__":
     main()

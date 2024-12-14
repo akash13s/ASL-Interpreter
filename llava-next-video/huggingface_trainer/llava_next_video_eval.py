@@ -10,6 +10,7 @@ OUTPUT_DIR = "./output/"
 OUTPUT_FILE = "./output/generated_texts.json"
 EVAL_FILE = "./output/evaluation_metrics.csv"
 
+
 class EvaluationMetrics:
     def __init__(self, json_file_path, output_dir):
         """
@@ -37,7 +38,7 @@ class EvaluationMetrics:
             json_string = file.read()
 
         # Fix missing commas between objects
-        fixed_json_string = re.sub(r'\}\s*\{', '},{', json_string)
+        fixed_json_string = re.sub(r'}\s*\{', '},{', json_string)
         print("Fixed JSON formatting if necessary.")
 
         # Parse JSON data
@@ -62,12 +63,12 @@ class EvaluationMetrics:
         rouge_scores = self.scorer.score(true_desc, gen_desc)
 
         # BLEU Score with smoothing (unigram and bigram)
-        smoothing_function = SmoothingFunction().method1
+        smoothing_function = SmoothingFunction()
         bleu_score = sentence_bleu(
             [true_desc.split()],
             gen_desc.split(),
             weights=(0.5, 0.5),
-            smoothing_function=smoothing_function
+            smoothing_function=smoothing_function.method1
         )
 
         print(f"Computed metrics for ID: {sample['id']}")
@@ -87,7 +88,7 @@ class EvaluationMetrics:
             str: Path to the saved CSV file.
         """
         print("Starting evaluation process...")
-        
+
         # Compute metrics for each sample
         print("Computing metrics for each sample...")
         metric_results = [self.compute_metrics(sample) for sample in self.data]
@@ -105,6 +106,7 @@ class EvaluationMetrics:
         print(f"Per-epoch metrics calculated and saved to {EVAL_FILE}")
 
         return EVAL_FILE
+
 
 if __name__ == "__main__":
     # Ensure the output directory exists
