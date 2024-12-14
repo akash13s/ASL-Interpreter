@@ -48,9 +48,9 @@ WEIGHT_DECAY = 0.05
 NUM_EPOCHS = 20
 
 # Quantization parameters
-USE_QLORA = True
+USE_QLORA = False
 USE_4BIT = False #Keep false if not using QLORA
-USE_8BIT = True #Keep false if not using QLORA
+USE_8BIT = False #Keep false if not using QLORA
 USE_DBL_QUANT = False #Keep false if not using QLORA
 
 # LoRA hyperparameters
@@ -133,7 +133,6 @@ def get_frames(video_path: str, num_frames: int = 8) -> np.ndarray:
     # Get video stream
     stream = container.streams.video[0]
     total_frames = stream.frames
-    fps = stream.average_rate
 
     # Calculate indices to sample
     indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
@@ -263,7 +262,6 @@ def create_train_val_datasets(video_dir: str, csv_file: str, processor, num_fram
 
     # Calculate split sizes
     train_size = int(len(full_df) * TRAIN_VAL_SPLIT)
-    val_size = len(full_df) - train_size
 
     # Randomly shuffle the dataframe
     shuffled_df = full_df.sample(frac=1, random_state=42).reset_index(drop=True)
