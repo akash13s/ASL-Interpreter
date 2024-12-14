@@ -38,7 +38,7 @@ TRAIN_VAL_SPLIT = 0.8
 
 # Model constants
 BATCH_SIZE = 4
-MAX_LENGTH = 128  # Fixed sequence length for text
+MAX_LENGTH = 3500  # Fixed sequence length for text
 NUM_FRAMES = 16  # Fixed number of frames
 IMAGE_SIZE = 224  # Fixed image size
 
