@@ -358,6 +358,7 @@ class SaveGeneratedTextsCallback(TrainerCallback):
 
                 # Append results
                 results.append({
+                    "epoch": state.epoch,
                     "id": idx,
                     "video_id": sample['video_id'],
                     "generated": generated_text,

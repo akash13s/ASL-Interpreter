@@ -90,8 +90,8 @@ class EvaluationMetrics:
 
         print(f"Computed metrics for ID: {sample['id']}")
         return {
+            "epoch": sample["epoch"],
             "id": sample["id"],
-            # "video_id": sample['video_id'],
             "rouge1": rouge_scores['rouge1'].fmeasure,
             "rouge2": rouge_scores['rouge2'].fmeasure,
             "rougeL": rouge_scores['rougeL'].fmeasure,
@@ -118,21 +118,15 @@ class EvaluationMetrics:
         df = pd.DataFrame(metric_results)
         print(f"Computed metrics for all {len(self.data)} samples.")
 
-        # Calculate averages for numeric columns
-        avg_results = df.mean(numeric_only=True)
+        # Calculate averages per epoch
+        print("Calculating average metrics per epoch...")
+        avg_per_epoch = df.groupby("epoch").mean(numeric_only=True).reset_index()
 
-        # Add the average row to the DataFrame
-        avg_results_row = pd.DataFrame(avg_results).transpose()
-        avg_results_row['id'] = 'average'
-        avg_results_row['video'] = 'average'
+        # Save results with per-epoch averages
+        avg_per_epoch.to_csv(EVAL_FILE, index=False)
+        print(f"Per-epoch metrics calculated and saved to {EVAL_FILE}")
 
-        # Append the average row to the DataFrame
-        df_with_avg = pd.concat([df, avg_results_row], ignore_index=True)
-        print("Added average metrics to the results.")
-
-        # Save to CSV
-        df_with_avg.to_csv(EVAL_FILE, index=False)
-        print(f"Metrics calculated and saved to {EVAL_FILE}")
+        return EVAL_FILE
 
 if __name__ == "__main__":
     # Ensure the output directory exists
