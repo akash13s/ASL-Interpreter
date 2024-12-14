@@ -104,8 +104,6 @@ class EvaluationMetrics:
         avg_per_epoch.to_csv(EVAL_FILE, index=False)
         print(f"Per-epoch metrics calculated and saved to {EVAL_FILE}")
 
-        return EVAL_FILE
-
 if __name__ == "__main__":
     # Ensure the output directory exists
     os.makedirs(OUTPUT_DIR, exist_ok=True)
