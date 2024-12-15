@@ -221,7 +221,7 @@ class VideoDataset(Dataset):
         frames = get_frames(video_path, self.num_frames)
 
         # Prepare the prompt
-        if self.mode == "train" or self.mode == "eval":
+        if self.mode == "train":
             prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT: {sentence}"
         else:
             prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT:"  # Exclude true sentence
@@ -236,7 +236,26 @@ class VideoDataset(Dataset):
             return_tensors="pt"
         )
 
-        # Create labels from input_ids
+        labels = None
+        if self.mode == "train":
+            labels = self.get_labels(inputs)
+
+        # Return tensors with consistent sizes
+        item = {
+            "input_ids": inputs["input_ids"].squeeze(0),
+            "attention_mask": inputs["attention_mask"].squeeze(0),
+            "pixel_values_videos": inputs["pixel_values_videos"].squeeze(0),
+            "video_id": video_id
+        }
+
+        if self.mode == "train":
+            item["labels"] = labels.squeeze(0)
+        if self.mode == "val":
+            item["true_sentence"]: sentence
+
+        return item
+
+    def get_labels(self, inputs: dict) -> np.ndarray:
         labels = inputs["input_ids"].clone()
         labels[labels == self.processor.tokenizer.pad_token_id] = -100
 
@@ -250,15 +269,7 @@ class VideoDataset(Dataset):
         if assistant_start is not None:
             labels[0, :assistant_start + 4] = -100
 
-        # Return tensors with consistent sizes
-        return {
-            "input_ids": inputs["input_ids"].squeeze(0),
-            "attention_mask": inputs["attention_mask"].squeeze(0),
-            "pixel_values_videos": inputs["pixel_values_videos"].squeeze(0),
-            "labels": labels.squeeze(0),
-            "true_sentence": sentence,
-            "video_id": video_id
-        }
+        return labels
 
 
 def create_train_val_datasets(video_dir: str, csv_file: str, processor, num_frames: int = 16):
