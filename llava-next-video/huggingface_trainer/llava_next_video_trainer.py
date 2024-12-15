@@ -524,5 +524,6 @@ def main():
 
     logger.info(f"Model and processor saved to {final_model_path}")
 
+
 if __name__ == "__main__":
     main()

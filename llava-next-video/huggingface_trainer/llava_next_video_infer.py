@@ -1,13 +1,14 @@
+import json
 import os
+
 import av
 import numpy as np
 import pandas as pd
 import torch
-import json
 from peft import PeftModel
 from torch.utils.data import Dataset
-from transformers import AutoProcessor, LlavaNextVideoForConditionalGeneration, BitsAndBytesConfig
 from torchvision import transforms
+from transformers import AutoProcessor, LlavaNextVideoForConditionalGeneration, BitsAndBytesConfig
 
 # Constants
 CACHE_DIR = "./cache/"
@@ -26,19 +27,20 @@ IMAGE_SIZE = 224  # Fixed image size
 
 # Quantization parameters
 USE_QLORA = False
-USE_4BIT = False #Keep false if not using QLORA
-USE_8BIT = False #Keep false if not using QLORA
-USE_DBL_QUANT = False #Keep false if not using QLORA
+USE_4BIT = False  # Keep false if not using QLORA
+USE_8BIT = False  # Keep false if not using QLORA
+USE_DBL_QUANT = False  # Keep false if not using QLORA
+
 
 def read_video_pyav(container, indices):
-    '''
+    """
     Decode the video with PyAV decoder.
     Args:
         container (`av.container.input.InputContainer`): PyAV container.
         indices (`List[int]`): List of frame indices to decode.
     Returns:
         result (np.ndarray): np array of decoded frames of shape (num_frames, height, width, 3).
-    '''
+    """
     frames = []
     container.seek(0)
     start_index = indices[0]
@@ -63,6 +65,7 @@ def read_video_pyav(container, indices):
             frames.append(resized_frame)
 
     return np.stack(frames)
+
 
 def get_frames(video_path: str, num_frames: int = 8):
     """
@@ -98,6 +101,7 @@ def get_frames(video_path: str, num_frames: int = 8):
     container.close()
     return frames
 
+
 class VideoDataset(Dataset):
     """
     Custom Dataset for handling video data and corresponding text annotations.
@@ -111,6 +115,7 @@ class VideoDataset(Dataset):
         mode (str): Mode of the dataset, either "train" or "eval". Default is "train".
                     If "train", the true sentence is included in the prompt. Otherwise, it is excluded.
     """
+
     def __init__(self, video_dir: str, annotations: pd.DataFrame, processor, num_frames: int = 16, mode: str = "train"):
         self.video_dir = video_dir
         self.annotations = annotations
@@ -200,6 +205,7 @@ class VideoDataset(Dataset):
             "video_id": video_id
         }
 
+
 def get_quantization_config(use_qlora: bool, use_4bit: bool, use_8bit: bool, use_double_quant: bool):
     """
     Generate the appropriate BitsAndBytesConfig for quantization.
@@ -231,6 +237,7 @@ def get_quantization_config(use_qlora: bool, use_4bit: bool, use_8bit: bool, use
         })
 
     return BitsAndBytesConfig(**quantization_config)
+
 
 def run_inference_with_dataset(video_dir, csv_file, output_file, processor, model, num_frames, device):
     """
@@ -296,6 +303,7 @@ def run_inference_with_dataset(video_dir, csv_file, output_file, processor, mode
 
     print(f"Inference complete. Results saved to {output_file}")
 
+
 def main():
     # Load the model and processor
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -325,6 +333,7 @@ def main():
         num_frames=NUM_FRAMES,
         device=device
     )
+
 
 if __name__ == "__main__":
     main()
