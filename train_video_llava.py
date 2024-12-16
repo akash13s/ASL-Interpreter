@@ -1,19 +1,26 @@
 import av
+import bisect
 import numpy as np
 import torch
 from torchvision import transforms
-from torch.utils.data import Dataset, random_split
-from transformers import (
-    AutoProcessor,
-    BitsAndBytesConfig,
-    VideoLlavaForConditionalGeneration,
-    Trainer,
-    TrainingArguments
-)
+from torch.utils.data import Dataset, DataLoader
+from transformers import AutoProcessor, BitsAndBytesConfig, VideoLlavaForConditionalGeneration
 from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
+import json
+import torch.nn.utils.prune as prune
+from tqdm import tqdm
 import os
-from typing import Tuple
+from typing import Tuple, Any
 import pandas as pd
+from torch.cuda.amp import autocast
+# from torch.nn.parallel import DataParallel
+
+from accelerate import Accelerator
+from accelerate import DistributedDataParallelKwargs
+
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
+torch.cuda.empty_cache()
 
 # Constants
 MODEL_ID = "LanguageBind/Video-LLaVA-7B-hf"
@@ -23,19 +30,27 @@ MODEL_NAME = MODEL_ID.split("/")[-1]
 VIDEO_DIR = "/scratch/as18464/raw_videos"
 CSV_FILE = "valid_clips.csv"
 CACHE_DIR = "cache/"
-DATASET_SIZE = 125
-TRAIN_VAL_SPLIT = 0.8
+DATASET_SIZE = 500
 
-# Model constants
-BATCH_SIZE = 4
-MAX_LENGTH = 128  # Fixed sequence length for text
-NUM_FRAMES = 64   # Fixed number of frames
-IMAGE_SIZE = 224  # Fixed image size
+# LoRA hyperparameters
+LORA_R = 8
+LORA_ALPHA = 32
+LORA_DROPOUT = 0.1
+LORA_TARGET_MODULES = [
+    "q_proj",
+    "v_proj",
+    "k_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+]
 
-# Training hyperparameters
+# model constants
+BATCH_SIZE = 5
+MAX_LENGTH = 128
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 0.05
-NUM_EPOCHS = 20
 
 def read_video_pyav(container, indices):
     '''
@@ -106,25 +121,23 @@ def get_frames(video_path: str, num_frames: int = 8) -> np.ndarray:
     container.close()
     return frames
 
-
 class VideoDataset(Dataset):
-    def __init__(self, video_dir: str, annotations: pd.DataFrame, processor, num_frames: int = 16):
+    def __init__(self, video_dir: str, csv_file: str, num_frames: int = 8):
         self.video_dir = video_dir
-        self.annotations = annotations
+        self.annotations = pd.read_csv(csv_file, sep=',').head(DATASET_SIZE).reset_index(drop=True)
         self.num_frames = num_frames
-        self.processor = processor
         self.system_prompt = ("Analyze the American Sign Language (ASL) signs in this video and "
                             "translate them into clear, natural English. Consider the sequence of "
                             "signs as a complete message, and provide an accurate translation that "
                             "captures the full meaning. Respond with only the English translation, "
                             "without descriptions of the signs themselves.")
         
-        print(f"Created dataset split with {len(self.annotations)} entries")
+        print(f"Loaded dataset with {len(self.annotations)} entries")
     
     def __len__(self) -> int:
         return len(self.annotations)
     
-    def __getitem__(self, idx: int) -> dict:
+    def __getitem__(self, idx: int) -> Tuple[str, np.ndarray]:
         row = self.annotations.iloc[idx]
         video_id = str(row['SENTENCE_NAME']).strip()
         sentence = str(row['SENTENCE']).strip()
@@ -133,140 +146,207 @@ class VideoDataset(Dataset):
         if not os.path.isfile(video_path):
             raise FileNotFoundError(f"Video file '{video_path}' not found.")
         
-        # Get video frames using the provided functions
         frames = get_frames(video_path, self.num_frames)
+        
         prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT: {sentence}"
+
+        frames_list = [frame for frame in frames]
+        frames_list = [transforms.ToTensor()(frame) for frame in frames_list]
+        frame_tensor = torch.stack(frames_list)
         
-        # Process the frames and text with fixed sizes
-        inputs = self.processor(
-            text=prompt,
-            videos=[frames],  # frames is already in the correct format from get_frames
-            padding="max_length",  # Always pad to max_length
-            truncation=True,
-            max_length=MAX_LENGTH,
-            return_tensors="pt"
-        )
+        return prompt, frame_tensor
+
+def train_epoch(model, train_loader, optimizer, processor, accelerator, epoch):
+    model.train()
+    total_loss = 0
+    progress_bar = tqdm(train_loader, desc=f'Training Epoch {epoch}')
+    
+    for batch_idx, (texts, videos) in enumerate(progress_bar):
+        vids = list(torch.unbind(videos, dim=0))
+        image_lists = []
+        for batch in vids:
+            images = [img.cpu().permute(1, 2, 0).numpy() for img in batch]
+            image_lists.append(images)
+        try:
+            batch = processor(
+                text=texts,
+                videos=image_lists,
+                padding=True,
+                truncation=True,
+                max_length=MAX_LENGTH,
+                return_tensors="pt",
+            )
+            
+            labels = batch["input_ids"].clone()
+            labels[labels == processor.tokenizer.pad_token_id] = -100
+
+            for i, text in enumerate(texts):
+                assistant_start = None
+                # Look for sequence: "ASSISTANT:"
+                for j in range(len(batch["input_ids"][i])):
+                    if processor.tokenizer.decode(batch["input_ids"][i][j:j+4]) == "ASSISTANT:":
+                        assistant_start = j
+                        break
+                
+                if assistant_start is not None:
+                    # Mask everything before and including "ASSISTANT:"
+                    labels[i, :assistant_start+4] = -100
+
+            # To remove later - for debugging
+            # print("\n====== Tokens and Labels for Batch", batch_idx, "======")
+            # for i, text in enumerate(texts):
+            #     print(f"\nOriginal text {i}: {text}")
+            #     print("\nTokens and their labels:")
+            #     tokens = processor.tokenizer.convert_ids_to_tokens(batch["input_ids"][i])
+            #     for j, (token, label) in enumerate(zip(tokens, labels[i])):
+            #         print(f"Position {j:3d} | Token: {token:15} | Label: {label.item():5}")
+            #     print("-" * 50)
+            
+            batch["labels"] = labels
+            
+            input_ids = accelerator.prepare(batch["input_ids"])
+            attention_mask = accelerator.prepare(batch["attention_mask"])
+            pixel_values_videos = accelerator.prepare(batch["pixel_values_videos"])
+            labels = accelerator.prepare(batch["labels"])
+            
+            optimizer.zero_grad()
+            
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                pixel_values_videos=pixel_values_videos,
+                labels=labels
+            )
+            loss = outputs.loss
+
+            accelerator.backward(loss)
+            
+            # torch.nn.utils.clip_gradnorm(model.parameters(), 1.0)
+            optimizer.step()
+
+            current_loss = loss.item()
+            total_loss += current_loss
+            avg_loss = total_loss / (batch_idx + 1)
+
+            progress_bar.set_postfix({
+                'batch_loss': f'{current_loss:.4f}',
+                'avg_loss': f'{avg_loss:.4f}'
+            })
+
+            if accelerator.is_main_process:
+                print(f'Epoch {epoch} | Batch {batch_idx}/{len(train_loader)} | '
+                      f'Loss: {current_loss:.4f} | Avg Loss: {avg_loss:.4f}')
+            
+        except Exception as e:
+            raise e
+
+    if accelerator.is_main_process and epoch%5 == 0:
+        checkpoint_path = f"output/checkpoint_epoch_{epoch}"
+        os.makedirs("output", exist_ok=True)
         
-        # Create labels from input_ids
-        labels = inputs["input_ids"].clone()
-        labels[labels == self.processor.tokenizer.pad_token_id] = -100
+        unwrapped_model = accelerator.unwrap_model(model)
         
-        # Mask everything before and including "ASSISTANT:"
-        assistant_start = None
-        for j in range(len(inputs["input_ids"][0])):
-            if self.processor.tokenizer.decode(inputs["input_ids"][0][j:j+4]) == "ASSISTANT:":
-                assistant_start = j
-                break
-        
-        if assistant_start is not None:
-            labels[0, :assistant_start+4] = -100
-        
-        # Return tensors with consistent sizes
-        return {
-            "input_ids": inputs["input_ids"].squeeze(0),
-            "attention_mask": inputs["attention_mask"].squeeze(0),
-            "pixel_values_videos": inputs["pixel_values_videos"].squeeze(0),
-            "labels": labels.squeeze(0)
+        if hasattr(unwrapped_model, 'get_peft_state_dict'):
+            state_dict = unwrapped_model.get_peft_state_dict()
+        else:
+            state_dict = unwrapped_model.state_dict()
+    
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': state_dict,
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': loss
         }
-
-def create_train_val_datasets(video_dir: str, csv_file: str, processor, num_frames: int = 16):
-    # Read the full dataset
-    full_df = pd.read_csv(csv_file, sep=',').head(DATASET_SIZE).reset_index(drop=True)
+        
+        print(f"Saving checkpoint for epoch {epoch} with average loss: {avg_loss:.4f}")
+        torch.save(checkpoint, checkpoint_path)
     
-    # Calculate split sizes
-    train_size = int(len(full_df) * TRAIN_VAL_SPLIT)
-    val_size = len(full_df) - train_size
+    return total_loss / len(train_loader)
+
+# Create dataset and dataloader
+def create_data_loader(video_dir, csv_file, batch_size, num_frames=8):
+    dataset = VideoDataset(
+        video_dir=video_dir,
+        csv_file=csv_file,
+        num_frames=num_frames
+    )
     
-    # Randomly shuffle the dataframe
-    shuffled_df = full_df.sample(frac=1, random_state=42).reset_index(drop=True)
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,  # Set to 0 for debugging
+        pin_memory=False
+    )
     
-    # Split the dataframe
-    train_df = shuffled_df.iloc[:train_size]
-    val_df = shuffled_df.iloc[train_size:]
+    return loader
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+train_loader = create_data_loader(
+    video_dir=VIDEO_DIR,
+    csv_file=CSV_FILE,
+    batch_size=BATCH_SIZE,
+    num_frames=16
+)
+
+quantization_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_quant_type="nf4",  # or "fp4"
+    bnb_4bit_use_double_quant=True
+)
+
+model = VideoLlavaForConditionalGeneration.from_pretrained(
+    MODEL_ID,
+    torch_dtype=torch.float16,
+    device_map="auto",
+    cache_dir=CACHE_DIR,
+    quantization_config=quantization_config
+)
+
+p_model = prepare_model_for_kbit_training(model)
+
+# Configure LoRA
+peft_config = LoraConfig(
+    r=LORA_R,
+    lora_alpha=LORA_ALPHA,
+    target_modules=LORA_TARGET_MODULES,
+    lora_dropout=LORA_DROPOUT,
+    bias="none",
+    task_type=TaskType.CAUSAL_LM
+)
+
+# Get PEFT model
+p_model = get_peft_model(p_model, peft_config)
+p_model.print_trainable_parameters()
+
+def set_trainable_params(model):
+    # First make sure all parameters are not trainable
+    for param in model.parameters():
+        param.requires_grad = False
     
-    # Create dataset objects
-    train_dataset = VideoDataset(video_dir, train_df, processor, num_frames)
-    val_dataset = VideoDataset(video_dir, val_df, processor, num_frames)
-    
-    return train_dataset, val_dataset
+    # Then enable training only for the LoRA parameters
+    for name, param in model.named_parameters():
+        if "lora_" in name:  # This targets only the LoRA layers
+            param.requires_grad = True
 
-def main():
-    # Set up device and processor
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    processor = AutoProcessor.from_pretrained(MODEL_ID)
-    processor.tokenizer.padding_side = "right"
-    processor.image_processor.do_rescale = False
+set_trainable_params(p_model)
 
-    processor.patch_size = 14  # Standard patch size for ViT-L
+optimizer = torch.optim.AdamW(p_model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 
-    # Create train and validation datasets
-    train_dataset, val_dataset = create_train_val_datasets(
-        video_dir=VIDEO_DIR,
-        csv_file=CSV_FILE,
-        processor=processor,
-        num_frames=NUM_FRAMES
-    )
+# initialize the accelerator with the right kwargs
+ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
 
-    # Initialize model with quantization
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_compute_dtype=torch.float16
-    )
+# Prepare your model, optimizer, and dataloader with accelerator
+p_model, optimizer, train_loader = accelerator.prepare(
+    p_model, optimizer, train_loader
+)
 
-    model = VideoLlavaForConditionalGeneration.from_pretrained(
-        MODEL_ID,
-        torch_dtype=torch.float16,
-        device_map="auto",
-        cache_dir=CACHE_DIR,
-        quantization_config=quantization_config
-    )
+processor = AutoProcessor.from_pretrained(MODEL_ID)
+processor.tokenizer.padding_side = "right"
+processor.image_processor.do_rescale = False
 
-    # Prepare model for k-bit training and configure LoRA
-    model = prepare_model_for_kbit_training(model)
-    peft_config = LoraConfig(
-        r=8,
-        lora_alpha=32,
-        target_modules=["q_proj", "v_proj", "k_proj", "o_proj", 
-                       "gate_proj", "up_proj", "down_proj"],
-        lora_dropout=0.1,
-        bias="none",
-        task_type=TaskType.CAUSAL_LM
-    )
-    model = get_peft_model(model, peft_config)
-
-    # Configure training arguments
-    training_args = TrainingArguments(
-        output_dir="output",
-        num_train_epochs=NUM_EPOCHS,
-        per_device_train_batch_size=BATCH_SIZE,
-        per_device_eval_batch_size=BATCH_SIZE,
-        gradient_accumulation_steps=1,
-        learning_rate=LEARNING_RATE,
-        weight_decay=WEIGHT_DECAY,
-        fp16=True,
-        logging_dir="logs",
-        logging_steps=10,
-        save_strategy="epoch",
-        evaluation_strategy="epoch",
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
-        remove_unused_columns=False,
-        ddp_find_unused_parameters=True,
-        dataloader_num_workers=0,
-    )
-
-    # Initialize trainer without custom collator
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=val_dataset,
-        compute_metrics=None,
-    )
-
-    # Start training
-    trainer.train()
-
-if __name__ == "__main__":
-    main()
+for i in range(10):
+    train_epoch(p_model, train_loader, optimizer, processor, accelerator, i+1)
