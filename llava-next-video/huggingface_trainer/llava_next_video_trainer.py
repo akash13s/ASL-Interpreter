@@ -479,7 +479,7 @@ def main():
         save_strategy="epoch",
         eval_strategy="epoch",
         load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
+        metric_for_best_model="epoch",  # should ideally be 'eval_loss', but 'eval_loss' value is NaN
         greater_is_better=False,
         remove_unused_columns=False,
         ddp_find_unused_parameters=True,
