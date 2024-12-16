@@ -245,13 +245,12 @@ class VideoDataset(Dataset):
             "input_ids": inputs["input_ids"].squeeze(0),
             "attention_mask": inputs["attention_mask"].squeeze(0),
             "pixel_values_videos": inputs["pixel_values_videos"].squeeze(0),
-            "video_id": video_id
+            "video_id": video_id,
+            "true_sentence": sentence
         }
 
         if self.mode == "train":
             item["labels"] = labels.squeeze(0)
-        else:
-            item["true_sentence"]: sentence
 
         return item
 
