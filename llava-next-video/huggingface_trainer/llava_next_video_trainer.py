@@ -250,7 +250,7 @@ class VideoDataset(Dataset):
 
         if self.mode == "train":
             item["labels"] = labels.squeeze(0)
-        if self.mode == "val":
+        else:
             item["true_sentence"]: sentence
 
         return item
