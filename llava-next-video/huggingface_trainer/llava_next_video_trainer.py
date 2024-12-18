@@ -29,12 +29,12 @@ MODEL_NAME = MODEL_ID.split("/")[-1]
 
 # File/directory
 VIDEO_DIR = "/scratch/as18464/raw_videos"
-CSV_FILE = "../data/valid_clips.csv"
+CSV_FILE = "../../data/valid_clips.csv"
 CACHE_DIR = "./cache/"
 OUTPUT_DIR = "./output/"
 LOG_DIR = "./logs"
 
-DATASET_SIZE = 100
+DATASET_SIZE = 5000
 TRAIN_VAL_SPLIT = 0.8
 
 # Model constants
