@@ -5,8 +5,8 @@
 #SBATCH --time=24:00:00
 #SBATCH --mem=64GB
 #SBATCH --gres=gpu:1                 # Request 1 GPU per node
-#SBATCH --job-name=video-llava-lora
-#SBATCH --output=video-llava-lora.out
+#SBATCH --job-name=video-llava
+#SBATCH --output=video-llava.out
 #SBATCH --nice=0
 
 module purge
