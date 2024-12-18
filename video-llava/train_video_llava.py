@@ -1,4 +1,3 @@
-
 import av
 import numpy as np
 import torch
@@ -45,7 +44,7 @@ LORA_TARGET_MODULES = [
 
 # model constants
 BATCH_SIZE = 5
-MAX_LENGTH = 3500
+MAX_LENGTH = 128
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 0.05
 
@@ -205,40 +204,6 @@ def train_epoch(model, train_loader, optimizer, processor, accelerator, epoch):
             attention_mask = accelerator.prepare(batch["attention_mask"])
             pixel_values_videos = accelerator.prepare(batch["pixel_values_videos"])
             labels = accelerator.prepare(batch["labels"])
-
-            frame_count = pixel_values_videos.shape[1]
-            height, width = pixel_values_videos.shape[3], pixel_values_videos.shape[4]
-            n_video_tokens = (input_ids == processor.tokenizer.convert_tokens_to_ids("<video>")).sum(dim=1)
-            expected_tokens = frame_count * (height // processor.patch_size) * (width // processor.patch_size) // 4
-            token_diffs = expected_tokens - n_video_tokens
-            
-            # Adjust input_ids, attention_mask, and labels
-            max_length = input_ids.size(1) + max(0, token_diffs.max().item())
-            adjusted_input_ids = torch.full((input_ids.size(0), max_length), processor.tokenizer.pad_token_id, device=accelerator.device)
-            adjusted_attention_mask = torch.zeros((input_ids.size(0), max_length), device=accelerator.device)
-            adjusted_labels = torch.full((input_ids.size(0), max_length), -100, device=accelerator.device)
-            
-            for i in range(input_ids.size(0)):
-                current_length = input_ids.size(1)
-                diff = token_diffs[i].item()
-            
-                # Add tokens or truncate as needed
-                if diff > 0:
-                    # Add extra <video> tokens
-                    adjusted_input_ids[i, :current_length] = input_ids[i]
-                    adjusted_input_ids[i, current_length:current_length + diff] = processor.tokenizer.convert_tokens_to_ids("<video>")
-                    adjusted_attention_mask[i, :current_length + diff] = attention_mask[i]
-                    adjusted_labels[i, :current_length] = labels[i]
-                else:
-                    # Truncate tokens
-                    adjusted_input_ids[i, :current_length + diff] = input_ids[i, :current_length + diff]
-                    adjusted_attention_mask[i, :current_length + diff] = attention_mask[i, :current_length + diff]
-                    adjusted_labels[i, :current_length + diff] = labels[i, :current_length + diff]
-            
-            # Replace original tensors with adjusted ones
-            input_ids = adjusted_input_ids
-            attention_mask = adjusted_attention_mask
-            labels = adjusted_labels
             
             optimizer.zero_grad()
             
@@ -322,14 +287,10 @@ train_loader = create_data_loader(
 )
 
 quantization_config = BitsAndBytesConfig(
-    load_in_8bit=False,
-    load_in_4bit=False,
-    llm_int8_threshold=0.5,  # Lower threshold for increased precision
-    llm_int8_skip_modules=None,  # None if skipping is not needed
-    llm_int8_enable_fp32_cpu_offload=False,
-    llm_int8_has_fp16_weight=True,  # Use FP16 weights for better precision
-    # Ensures highest precision in computations
-    bnb_4bit_compute_dtype=torch.float16
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_quant_type="nf4",  # or "fp4"
+    bnb_4bit_use_double_quant=True
 )
 
 model = VideoLlavaForConditionalGeneration.from_pretrained(
