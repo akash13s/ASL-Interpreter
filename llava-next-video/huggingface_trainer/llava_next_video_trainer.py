@@ -450,7 +450,9 @@ def main():
 
     # Prepare model for k-bit training and configure LoRA
     # Check if the model already has a PEFT configuration
-    if not isinstance(model, PeftModel):
+    if hasattr(model, "peft_config") and model.peft_config is not None:
+        logger.info("PEFT configuration already found. Skipping reapplication.")
+    else:
         model = prepare_model_for_kbit_training(model)
         peft_config = LoraConfig(
             r=LORA_R,
@@ -462,8 +464,6 @@ def main():
         )
         model = get_peft_model(model, peft_config)
         logger.info("LoRA configuration complete.")
-    else:
-        logger.info("PEFT configuration already found. Skipping reapplication.")
 
     # Configure training arguments
     training_args = TrainingArguments(
