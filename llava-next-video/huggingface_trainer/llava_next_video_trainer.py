@@ -7,7 +7,7 @@ import av
 import numpy as np
 import pandas as pd
 import torch
-from peft import PeftModel, get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
+from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
 from torch.utils.data import Dataset
 from torchvision import transforms
 from transformers import (
@@ -47,7 +47,7 @@ IMAGE_SIZE = 224  # Fixed image size
 # Training hyperparameters
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 0.05
-NUM_EPOCHS = 5
+NUM_EPOCHS = 10
 
 # Quantization parameters
 USE_QLORA = True
@@ -464,8 +464,7 @@ def main():
     # Configure training arguments
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
-        num_train_epochs=NUM_EPOCHS + 5,
-        # resume_from_checkpoint=CHECKPOINT_PATH if os.path.exists(CHECKPOINT_PATH) else None,
+        num_train_epochs=NUM_EPOCHS,
         per_device_train_batch_size=BATCH_SIZE,
         per_device_eval_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=1,
