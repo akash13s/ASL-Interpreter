@@ -271,7 +271,7 @@ def run_inference_with_dataset(video_dir, csv_file, generated_texts_csv, output_
 
     # Open the CSV file for writing
     with open(output_file, 'a', newline="") as csvfile:
-        fieldnames = ["id", "video_id", "generated", "true"]
+        fieldnames = ["epoch", "id", "video_id", "generated", "true"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
         # Write the header only if the file doesn't already exist
@@ -307,6 +307,7 @@ def run_inference_with_dataset(video_dir, csv_file, generated_texts_csv, output_
                     text = text.split(keyword, 1)[1].strip()
 
                 writer.writerow({
+                    "epoch": 1.0,
                     "id": idx,
                     "video_id": infer_data['video_id'],
                     "generated": text,
