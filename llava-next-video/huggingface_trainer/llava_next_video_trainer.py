@@ -436,7 +436,7 @@ def main():
 
     # Initialize model with quantization
     model = LlavaNextVideoForConditionalGeneration.from_pretrained(
-        CHECKPOINT_PATH,
+        MODEL_ID,
         torch_dtype=torch.float16,
         device_map="auto",
         cache_dir=CACHE_DIR,
@@ -448,11 +448,11 @@ def main():
 
     logger.info("Model loaded successfully.")
 
-    # Prepare model for k-bit training and configure LoRA
-    # Check if the model already has a PEFT configuration
-    if hasattr(model, "peft_config") and model.peft_config is not None:
-        logger.info("PEFT configuration already found. Skipping reapplication.")
+    if os.path.exists(CHECKPOINT_PATH):
+        logger.info(f"Loading peft adapter weights from checkpoint: {CHECKPOINT_PATH}")
+        model = PeftModel.from_pretrained(model, CHECKPOINT_PATH)
     else:
+        # Prepare model for k-bit training and configure LoRA
         model = prepare_model_for_kbit_training(model)
         peft_config = LoraConfig(
             r=LORA_R,
@@ -469,7 +469,7 @@ def main():
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
         num_train_epochs=NUM_EPOCHS + 5,
-        resume_from_checkpoint=CHECKPOINT_PATH,
+        resume_from_checkpoint=CHECKPOINT_PATH if os.path.exists(CHECKPOINT_PATH) else None,
         per_device_train_batch_size=BATCH_SIZE,
         per_device_eval_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=1,
@@ -507,10 +507,13 @@ def main():
 
     trainer.add_callback(callback)
 
-    logger.info("Trainer initialized. Starting training...")
-
     # Start training
-    trainer.train(resume_from_checkpoint=CHECKPOINT_PATH)
+    if os.path.exists(CHECKPOINT_PATH):
+        logger.info("Trainer initialized. Starting training from previous checkpoint...")
+        trainer.train(resume_from_checkpoint=CHECKPOINT_PATH)
+    else:
+        logger.info("Trainer initialized. Starting training...")
+        trainer.train()
     logger.info("Training complete.")
 
     # Save the final model and processor
@@ -522,6 +525,9 @@ def main():
 
     # Save the processor
     processor.save_pretrained(final_model_path)
+
+    # Save training args
+    training_args.save_to_json(os.path.join(final_model_path, "training_args.json"))
 
     logger.info(f"Model and processor saved to {final_model_path}")
 
