@@ -49,7 +49,7 @@ class Preprocessor:
         """
         Preprocess a single example.
         """
-        video_path = example["video_id"]
+        video_path = f"{self.video_dir}/{example["video_id"]}.mp4"
         sentence = example["true"]
 
         # Extract frames using get_frames
