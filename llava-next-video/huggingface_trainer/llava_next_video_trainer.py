@@ -33,6 +33,7 @@ CSV_FILE = "../../data/valid_clips.csv"
 CACHE_DIR = "./cache/"
 OUTPUT_DIR = "./output/"
 LOG_DIR = "./logs"
+CHECKPOINT_PATH = "./output/checkpoint-1200"
 
 DATASET_SIZE = 1500
 TRAIN_VAL_SPLIT = 0.8
@@ -435,7 +436,7 @@ def main():
 
     # Initialize model with quantization
     model = LlavaNextVideoForConditionalGeneration.from_pretrained(
-        MODEL_ID,
+        CHECKPOINT_PATH,
         torch_dtype=torch.float16,
         device_map="auto",
         cache_dir=CACHE_DIR,
@@ -464,7 +465,8 @@ def main():
     # Configure training arguments
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
-        num_train_epochs=NUM_EPOCHS,
+        num_train_epochs=NUM_EPOCHS + 5,
+        resume_from_checkpoint=CHECKPOINT_PATH,
         per_device_train_batch_size=BATCH_SIZE,
         per_device_eval_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=1,
@@ -505,7 +507,7 @@ def main():
     logger.info("Trainer initialized. Starting training...")
 
     # Start training
-    trainer.train()
+    trainer.train(resume_from_checkpoint=CHECKPOINT_PATH)
     logger.info("Training complete.")
 
     # Save the final model and processor
