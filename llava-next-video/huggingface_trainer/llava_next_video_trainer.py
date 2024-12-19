@@ -448,28 +448,24 @@ def main():
 
     logger.info("Model loaded successfully.")
 
-    if os.path.exists(CHECKPOINT_PATH):
-        logger.info(f"Loading peft adapter weights from checkpoint: {CHECKPOINT_PATH}")
-        model = PeftModel.from_pretrained(model, CHECKPOINT_PATH)
-    else:
-        # Prepare model for k-bit training and configure LoRA
-        model = prepare_model_for_kbit_training(model)
-        peft_config = LoraConfig(
-            r=LORA_R,
-            lora_alpha=LORA_ALPHA,
-            target_modules=LORA_TARGET_MODULES,
-            lora_dropout=LORA_DROPOUT,
-            bias="none",
-            task_type=TaskType.CAUSAL_LM
-        )
-        model = get_peft_model(model, peft_config)
-        logger.info("LoRA configuration complete.")
+    # Prepare model for k-bit training and configure LoRA
+    model = prepare_model_for_kbit_training(model)
+    peft_config = LoraConfig(
+        r=LORA_R,
+        lora_alpha=LORA_ALPHA,
+        target_modules=LORA_TARGET_MODULES,
+        lora_dropout=LORA_DROPOUT,
+        bias="none",
+        task_type=TaskType.CAUSAL_LM
+    )
+    model = get_peft_model(model, peft_config)
+    logger.info("LoRA configuration complete.")
 
     # Configure training arguments
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
         num_train_epochs=NUM_EPOCHS + 5,
-        resume_from_checkpoint=CHECKPOINT_PATH if os.path.exists(CHECKPOINT_PATH) else None,
+        # resume_from_checkpoint=CHECKPOINT_PATH if os.path.exists(CHECKPOINT_PATH) else None,
         per_device_train_batch_size=BATCH_SIZE,
         per_device_eval_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=1,
