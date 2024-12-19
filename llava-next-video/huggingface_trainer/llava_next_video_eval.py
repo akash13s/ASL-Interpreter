@@ -35,6 +35,11 @@ class EvaluationMetrics:
         required_columns = ["epoch", "id", "video_id", "generated", "true"]
         if not all(col in data.columns for col in required_columns):
             raise ValueError(f"The CSV file must contain the following columns: {required_columns}")
+        
+        # Handle missing or NaN values
+        print(f"Checking for missing values...")
+        data["true"] = data["true"].fillna("")  # Replace NaN in 'true' with an empty string
+        data["generated"] = data["generated"].fillna("")  # Replace NaN in 'generated' with an empty string
 
         print(f"Loaded {len(data)} records from CSV file.")
         return data
@@ -66,11 +71,11 @@ class EvaluationMetrics:
 
         print(f"Computed metrics for ID: {sample['id']} (Epoch: {sample['epoch']})")
         return {
-            "epoch": sample["epoch"],
-            "rouge1": rouge_scores['rouge1'].fmeasure,
-            "rouge2": rouge_scores['rouge2'].fmeasure,
-            "rougeL": rouge_scores['rougeL'].fmeasure,
-            "bleu": bleu_score
+            "EPOCH": sample["epoch"],
+            "ROUGE-1": rouge_scores['rouge1'].fmeasure,
+            "ROUGE-2": rouge_scores['rouge2'].fmeasure,
+            "ROUGE-L": rouge_scores['rougeL'].fmeasure,
+            "BLEU": bleu_score
         }
 
     def evaluate(self):
