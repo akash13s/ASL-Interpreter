@@ -1,6 +1,5 @@
 import av
 import numpy as np
-import torch
 from torchvision import transforms
 from transformers import AutoProcessor
 
@@ -86,7 +85,7 @@ def get_processor(model_id: str):
     return processor
 
 
-def generate_text(model, processor, sample, device=torch.device("cpu")):
+def generate_text(model, processor, sample, device):
     input_ids = sample['input_ids'].unsqueeze(0).to(device)
     attention_mask = sample['attention_mask'].unsqueeze(0).to(device)
     pixel_values_videos = sample['pixel_values_videos'].unsqueeze(0).to(device)

@@ -45,7 +45,9 @@ processor = get_processor(MODEL_ID)
 
 # Load Pre-processor
 preprocessor = Preprocessor(VIDEO_DIR, processor, NUM_FRAMES, IMAGE_SIZE, MAX_LENGTH, "eval")
-dataset = dataset.map(preprocessor, remove_columns=dataset.column_names)
+dataset = (dataset
+           .map(preprocessor, remove_columns=dataset.column_names)
+           .set_format("pt", columns=["input_ids", "attention_mask", "pixel_values_videos"], output_all_columns=True))
 
 # Set up device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
