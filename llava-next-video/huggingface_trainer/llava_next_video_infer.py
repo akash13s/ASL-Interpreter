@@ -15,7 +15,7 @@ MODEL_ID = "llava-hf/LLaVA-NeXT-Video-7B-hf"
 CACHE_DIR = "./cache/"
 VIDEO_DIR = "/scratch/as18464/raw_videos"
 CSV_FILE = "../../data/valid_clips.csv"
-OUTPUT_FILE = "./output/inference_original_model.csv"
+OUTPUT_FILE = "./output/generated_texts_original_model.csv"
 GENERATED_TEXTS = "./output/generated_texts.csv"
 
 # Model constants
