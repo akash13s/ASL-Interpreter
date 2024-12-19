@@ -5,32 +5,23 @@ import av
 import numpy as np
 import pandas as pd
 import torch
-from peft import PeftModel
 from torch.utils.data import Dataset
 from torchvision import transforms
 from transformers import AutoProcessor, LlavaNextVideoForConditionalGeneration, BitsAndBytesConfig
 
 # Constants
+MODEL_ID = "llava-hf/LLaVA-NeXT-Video-7B-hf"
+
 CACHE_DIR = "./cache/"
-MODEL_CHECKPOINT = "./output/model"
 VIDEO_DIR = "/scratch/as18464/raw_videos"
 CSV_FILE = "../../data/valid_clips.csv"
-OUTPUT_FILE = "./output/inference_results.csv"
-
-DATASET_SIZE = 1
+OUTPUT_FILE = "./output/inference_original_model.csv"
+GENERATED_TEXTS = "./output/generated_texts.csv"
 
 # Model constants
-BATCH_SIZE = 5
 MAX_LENGTH = 3500  # Fixed sequence length for text
 NUM_FRAMES = 16  # Fixed number of frames
 IMAGE_SIZE = 224  # Fixed image size
-
-# Quantization parameters
-USE_QLORA = True
-USE_4BIT = True  # Keep false if not using QLORA
-USE_8BIT = False  # Keep false if not using QLORA
-USE_DBL_QUANT = True  # Keep false if not using QLORA
-
 
 def read_video_pyav(container, indices):
     """
@@ -249,24 +240,33 @@ def get_quantization_config(use_qlora: bool, use_4bit: bool, use_8bit: bool, use
     return BitsAndBytesConfig(**quantization_config)
 
 
-def run_inference_with_dataset(video_dir, csv_file, output_file, processor, model, num_frames, device):
+def run_inference_with_dataset(video_dir, csv_file, generated_texts_csv, output_file, processor, model, num_frames, device):
     """
     Run inference using the VideoDataset and save results to a CSV file.
+    Filter video IDs based on the first epoch in generated_texts.csv.
 
     Args:
         video_dir (str): Path to the video directory.
         csv_file (str): Path to the annotations CSV file.
+        generated_texts_csv (str): Path to the CSV file containing generated texts.
         output_file (str): Path to save the inference results (CSV file).
         processor: Pretrained processor for the model.
         model: Loaded model for inference.
         num_frames (int): Number of frames to extract from each video.
         device: cpu or gpu.
     """
-    # Load the annotations
-    annotations = pd.read_csv(csv_file, sep=',').head(DATASET_SIZE).reset_index(drop=True)
+    # Load video IDs for the first epoch from generated_texts.csv
+    generated_texts = pd.read_csv(generated_texts_csv)
+    first_epoch_video_ids = generated_texts[generated_texts['epoch'] == 1]['video_id'].unique()
+
+    # Load the annotations and filter for video IDs in the first epoch
+    annotations = pd.read_csv(csv_file, sep=',')
+    annotations = annotations[annotations['video_id'].isin(first_epoch_video_ids)].reset_index(drop=True)
+
+    # Create the inference dataset
     infer_dataset = VideoDataset(video_dir, annotations, processor, num_frames, "infer")
 
-    # Check if the CSV file exists
+    # Check if the output CSV file already exists
     file_exists = os.path.exists(output_file)
 
     # Open the CSV file for writing
@@ -279,7 +279,7 @@ def run_inference_with_dataset(video_dir, csv_file, output_file, processor, mode
             writer.writeheader()
 
         # Inference loop
-        print("Starting inference...")
+        print("Running inference...")
         for idx in range(len(infer_dataset)):
             infer_data = infer_dataset[idx]
             # Move inputs to the appropriate device
@@ -319,18 +319,17 @@ def run_inference_with_dataset(video_dir, csv_file, output_file, processor, mode
 def main():
     # Load the model and processor
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    processor = AutoProcessor.from_pretrained(MODEL_CHECKPOINT)
+    processor = AutoProcessor.from_pretrained(MODEL_ID)
     processor.tokenizer.padding_side = "right"
     processor.image_processor.do_rescale = False
     processor.video_processor.do_rescale = False
 
     model = LlavaNextVideoForConditionalGeneration.from_pretrained(
-        MODEL_CHECKPOINT,
+        MODEL_ID,
         torch_dtype=torch.float16,
-        device_map="auto"
+        device_map="auto",
+        cache_dir=CACHE_DIR,
     )
-
-    model = PeftModel.from_pretrained(model, MODEL_CHECKPOINT)
     model.to(device)
     model.eval()
 
@@ -339,13 +338,13 @@ def main():
     run_inference_with_dataset(
         video_dir=VIDEO_DIR,
         csv_file=CSV_FILE,
+        generated_texts_csv=GENERATED_TEXTS,
         output_file=OUTPUT_FILE,
         processor=processor,
         model=model,
         num_frames=NUM_FRAMES,
         device=device
     )
-
 
 if __name__ == "__main__":
     main()
