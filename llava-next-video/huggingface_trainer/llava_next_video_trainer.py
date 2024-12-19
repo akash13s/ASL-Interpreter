@@ -34,11 +34,11 @@ CACHE_DIR = "./cache/"
 OUTPUT_DIR = "./output/"
 LOG_DIR = "./logs"
 
-DATASET_SIZE = 5000
+DATASET_SIZE = 1500
 TRAIN_VAL_SPLIT = 0.8
 
 # Model constants
-BATCH_SIZE = 4
+BATCH_SIZE = 5
 MAX_LENGTH = 3500  # Fixed sequence length for text
 NUM_FRAMES = 16  # Fixed number of frames
 IMAGE_SIZE = 224  # Fixed image size
@@ -46,13 +46,13 @@ IMAGE_SIZE = 224  # Fixed image size
 # Training hyperparameters
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 0.05
-NUM_EPOCHS = 10
+NUM_EPOCHS = 5
 
 # Quantization parameters
-USE_QLORA = False
-USE_4BIT = False  # Keep false if not using QLORA
+USE_QLORA = True
+USE_4BIT = True  # Keep false if not using QLORA
 USE_8BIT = False  # Keep false if not using QLORA
-USE_DBL_QUANT = False  # Keep false if not using QLORA
+USE_DBL_QUANT = True  # Keep false if not using QLORA
 
 # LoRA hyperparameters
 LORA_R = 8
