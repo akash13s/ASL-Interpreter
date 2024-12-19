@@ -521,9 +521,6 @@ def main():
     # Save the processor
     processor.save_pretrained(final_model_path)
 
-    # Save training args
-    training_args.save_to_json(os.path.join(final_model_path, "training_args.json"))
-
     logger.info(f"Model and processor saved to {final_model_path}")
 
 
