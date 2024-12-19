@@ -1,5 +1,6 @@
 import av
 import numpy as np
+import torch
 from torchvision import transforms
 from transformers import AutoProcessor
 
@@ -83,3 +84,32 @@ def get_processor(model_id: str):
     processor.video_processor.do_rescale = False
     processor.patch_size = 14  # Standard patch size for ViT-L
     return processor
+
+
+def generate_text(model, processor, sample, device=torch.device("cpu")):
+    input_ids = sample['input_ids'].unsqueeze(0).to(device)
+    attention_mask = sample['attention_mask'].unsqueeze(0).to(device)
+    pixel_values_videos = sample['pixel_values_videos'].unsqueeze(0).to(device)
+
+    # Generate predictions
+    inputs = {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "pixel_values_videos": pixel_values_videos,
+    }
+
+    generated_ids = model.generate(
+        **inputs,
+        max_new_tokens=128,
+        do_sample=False
+    )
+    generated_text = processor.tokenizer.batch_decode(
+        generated_ids, skip_special_tokens=True
+    )[0]
+
+    # Clean the generated text
+    keyword = "ASSISTANT:"
+    if keyword in generated_text:
+        generated_text = generated_text.split(keyword, 1)[1].strip()
+
+    return generated_text

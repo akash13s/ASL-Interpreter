@@ -28,7 +28,7 @@ LORA_TARGET_MODULES = [
 ]
 
 # File/Directory Constants
-CACHE_DIR = "../cache/"
-OUTPUT_DIR = "../output/"
+CACHE_DIR = "../cache"
+OUTPUT_DIR = "../output"
 CSV_FILE = "generated_texts_300.csv"
 VIDEO_DIR = "/scratch/as18464/raw_videos"

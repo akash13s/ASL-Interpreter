@@ -76,13 +76,15 @@ class Preprocessor:
             "input_ids": inputs["input_ids"].squeeze(0),
             "attention_mask": inputs["attention_mask"].squeeze(0),
             "pixel_values_videos": inputs["pixel_values_videos"].squeeze(0),
-            "video_id": example["video_id"]
+            "video_id": example["video_id"],
+            "epoch": example["epoch"],
+            "id": example["id"]
         }
 
         if self.mode == "train":
             labels = self.get_labels(inputs)
             item["labels"] = labels.squeeze(0)
 
-        item["true_sentence"] = sentence
+        item["true"] = sentence
 
         return item
