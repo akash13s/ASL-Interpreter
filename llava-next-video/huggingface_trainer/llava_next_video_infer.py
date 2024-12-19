@@ -1,4 +1,4 @@
-import json
+import csv
 import os
 
 import av
@@ -15,21 +15,21 @@ CACHE_DIR = "./cache/"
 MODEL_CHECKPOINT = "./output/model"
 VIDEO_DIR = "/scratch/as18464/raw_videos"
 CSV_FILE = "../../data/valid_clips.csv"
-OUTPUT_FILE = "./output/inference_results.json"
+OUTPUT_FILE = "./output/inference_results.csv"
 
 DATASET_SIZE = 1
 
 # Model constants
-BATCH_SIZE = 4
+BATCH_SIZE = 5
 MAX_LENGTH = 3500  # Fixed sequence length for text
 NUM_FRAMES = 16  # Fixed number of frames
 IMAGE_SIZE = 224  # Fixed image size
 
 # Quantization parameters
-USE_QLORA = False
-USE_4BIT = False  # Keep false if not using QLORA
+USE_QLORA = True
+USE_4BIT = True  # Keep false if not using QLORA
 USE_8BIT = False  # Keep false if not using QLORA
-USE_DBL_QUANT = False  # Keep false if not using QLORA
+USE_DBL_QUANT = True  # Keep false if not using QLORA
 
 
 def read_video_pyav(container, indices):
@@ -67,7 +67,7 @@ def read_video_pyav(container, indices):
     return np.stack(frames)
 
 
-def get_frames(video_path: str, num_frames: int = 8):
+def get_frames(video_path: str, num_frames: int = 8) -> np.ndarray:
     """
     Extract frames from video with consistent sampling
     Args:
@@ -166,7 +166,7 @@ class VideoDataset(Dataset):
         frames = get_frames(video_path, self.num_frames)
 
         # Prepare the prompt
-        if self.mode == "train" or self.mode == "eval":
+        if self.mode == "train":
             prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT: {sentence}"
         else:
             prompt = f"USER: {self.system_prompt}\n<video>\nASSISTANT:"  # Exclude true sentence
@@ -181,7 +181,25 @@ class VideoDataset(Dataset):
             return_tensors="pt"
         )
 
-        # Create labels from input_ids
+        labels = None
+        if self.mode == "train":
+            labels = self.get_labels(inputs)
+
+        # Return tensors with consistent sizes
+        item = {
+            "input_ids": inputs["input_ids"].squeeze(0),
+            "attention_mask": inputs["attention_mask"].squeeze(0),
+            "pixel_values_videos": inputs["pixel_values_videos"].squeeze(0),
+            "video_id": video_id,
+            "true_sentence": sentence
+        }
+
+        if self.mode == "train":
+            item["labels"] = labels.squeeze(0)
+
+        return item
+
+    def get_labels(self, inputs: dict) -> np.ndarray:
         labels = inputs["input_ids"].clone()
         labels[labels == self.processor.tokenizer.pad_token_id] = -100
 
@@ -195,15 +213,7 @@ class VideoDataset(Dataset):
         if assistant_start is not None:
             labels[0, :assistant_start + 4] = -100
 
-        # Return tensors with consistent sizes
-        return {
-            "input_ids": inputs["input_ids"].squeeze(0),
-            "attention_mask": inputs["attention_mask"].squeeze(0),
-            "pixel_values_videos": inputs["pixel_values_videos"].squeeze(0),
-            "labels": labels.squeeze(0),
-            "true_sentence": sentence,
-            "video_id": video_id
-        }
+        return labels
 
 
 def get_quantization_config(use_qlora: bool, use_4bit: bool, use_8bit: bool, use_double_quant: bool):
@@ -241,15 +251,14 @@ def get_quantization_config(use_qlora: bool, use_4bit: bool, use_8bit: bool, use
 
 def run_inference_with_dataset(video_dir, csv_file, output_file, processor, model, num_frames, device):
     """
-    Run inference using the VideoDataset and save results to a JSON file.
+    Run inference using the VideoDataset and save results to a CSV file.
 
     Args:
         video_dir (str): Path to the video directory.
         csv_file (str): Path to the annotations CSV file.
-        output_file (str): Path to save the inference results.
+        output_file (str): Path to save the inference results (CSV file).
         processor: Pretrained processor for the model.
         model: Loaded model for inference.
-        batch_size (int): Batch size for inference.
         num_frames (int): Number of frames to extract from each video.
         device: cpu or gpu.
     """
@@ -257,49 +266,52 @@ def run_inference_with_dataset(video_dir, csv_file, output_file, processor, mode
     annotations = pd.read_csv(csv_file, sep=',').head(DATASET_SIZE).reset_index(drop=True)
     infer_dataset = VideoDataset(video_dir, annotations, processor, num_frames, "infer")
 
-    results = []
+    # Check if the CSV file exists
+    file_exists = os.path.exists(output_file)
 
-    # Inference loop
-    print("Starting inference...")
-    for idx in range(len(infer_dataset)):
-        infer_data = infer_dataset[idx]
-        # Move inputs to the appropriate device
-        input_ids = infer_data["input_ids"].to(device)
-        attention_mask = infer_data["attention_mask"].to(device)
-        pixel_values_videos = infer_data["pixel_values_videos"].to(device)
+    # Open the CSV file for writing
+    with open(output_file, 'a', newline="") as csvfile:
+        fieldnames = ["id", "video_id", "generated", "true"]
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
-        # Retrieve preprocessed inputs
-        input_ids = infer_data['input_ids'].unsqueeze(0).to(device)
-        attention_mask = infer_data['attention_mask'].unsqueeze(0).to(device)
-        pixel_values_videos = infer_data['pixel_values_videos'].unsqueeze(0).to(device)
+        # Write the header only if the file doesn't already exist
+        if not file_exists:
+            writer.writeheader()
 
-        # Generate predictions
-        generated_ids = model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            pixel_values_videos=pixel_values_videos,
-            max_new_tokens=128,
-            do_sample=True,
-            top_p=0.9,
-        )
-        generated_texts = processor.tokenizer.batch_decode(
-            generated_ids, skip_special_tokens=True
-        )
+        # Inference loop
+        print("Starting inference...")
+        for idx in range(len(infer_dataset)):
+            infer_data = infer_dataset[idx]
+            # Move inputs to the appropriate device
+            input_ids = infer_data["input_ids"].to(device).unsqueeze(0)
+            attention_mask = infer_data["attention_mask"].to(device).unsqueeze(0)
+            pixel_values_videos = infer_data["pixel_values_videos"].to(device).unsqueeze(0)
 
-        # Clean generated texts
-        for _, text in enumerate(generated_texts):
-            keyword = "ASSISTANT:"
-            if keyword in text:
-                text = text.split(keyword, 1)[1].strip()
+            # Generate predictions
+            generated_ids = model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                pixel_values_videos=pixel_values_videos,
+                max_new_tokens=128,
+                do_sample=True,
+                top_p=0.9,
+            )
+            generated_texts = processor.tokenizer.batch_decode(
+                generated_ids, skip_special_tokens=True
+            )
 
-            results.append({
-                "video_id": infer_data['video_id'],
-                "generated_text": text,
-            })
+            # Clean generated texts and write to CSV
+            for _, text in enumerate(generated_texts):
+                keyword = "ASSISTANT:"
+                if keyword in text:
+                    text = text.split(keyword, 1)[1].strip()
 
-    # Save results to JSON
-    with open(output_file, "w") as f:
-        json.dump(results, f, indent=4)
+                writer.writerow({
+                    "id": idx,
+                    "video_id": infer_data['video_id'],
+                    "generated": text,
+                    "true": infer_data['true_sentence']
+                })
 
     print(f"Inference complete. Results saved to {output_file}")
 

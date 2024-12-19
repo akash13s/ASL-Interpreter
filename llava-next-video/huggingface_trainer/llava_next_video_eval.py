@@ -1,48 +1,42 @@
-import json
 import os
-
 import pandas as pd
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from rouge_score import rouge_scorer
 
 # Paths
-OUTPUT_DIR = "./output/"
-OUTPUT_FILE = "./output/generated_texts.json"
-EVAL_FILE = "./output/evaluation_metrics.csv"
+OUTPUT_FILE = "./output/generated_texts.csv"
+EVAL_FILE = "./output/validation_scores.csv"
 
 
 class EvaluationMetrics:
-    def __init__(self, json_file_path, output_dir):
+    def __init__(self, csv_file_path):
         """
         Initialize the evaluation metrics class.
 
         Args:
-            json_file_path (str): Path to the JSON file containing true and generated text.
-            output_dir (str): Directory to save the evaluation results.
+            csv_file_path (str): Path to the CSV file containing true and generated text.
         """
-        self.json_file_path = json_file_path
-        self.output_dir = output_dir
+        self.csv_file_path = csv_file_path
         self.scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
-        print(f"Initialized EvaluationMetrics with JSON file: {self.json_file_path}")
-        self.data = self._load_and_fix_json()
+        print(f"Initialized EvaluationMetrics with CSV file: {self.csv_file_path}")
+        self.data = self._load_and_fix_csv()
 
-    def _load_and_fix_json(self):
+    def _load_and_fix_csv(self):
         """
-        Load and parse the JSON file, accessing the `generated_texts` field.
+        Load and parse the CSV file.
 
         Returns:
-            list: Parsed JSON data as a list of dictionaries.
+            pd.DataFrame: Loaded data as a DataFrame.
         """
-        print(f"Loading and checking JSON file: {self.json_file_path}")
-        with open(self.json_file_path, 'r') as file:
-            json_data = json.load(file)
+        print(f"Loading and checking CSV file: {self.csv_file_path}")
+        data = pd.read_csv(self.csv_file_path)
 
-        # Ensure the key `generated_texts` is present and contains data
-        if "generated_texts" not in json_data or not isinstance(json_data["generated_texts"], list):
-            raise ValueError("The JSON file does not contain a valid 'generated_texts' field.")
+        # Ensure the CSV has the required columns
+        required_columns = ["epoch", "id", "video_id", "generated", "true"]
+        if not all(col in data.columns for col in required_columns):
+            raise ValueError(f"The CSV file must contain the following columns: {required_columns}")
 
-        data = json_data["generated_texts"]
-        print(f"Loaded {len(data)} records from JSON file.")
+        print(f"Loaded {len(data)} records from CSV file.")
         return data
 
     def compute_metrics(self, sample):
@@ -50,7 +44,7 @@ class EvaluationMetrics:
         Compute ROUGE and BLEU metrics for a single sample.
 
         Args:
-            sample (dict): A dictionary containing "true" and "generated" fields.
+            sample (pd.Series): A row from the DataFrame containing "true" and "generated" fields.
 
         Returns:
             dict: Metrics including ROUGE-1, ROUGE-2, ROUGE-L, and BLEU scores.
@@ -90,7 +84,7 @@ class EvaluationMetrics:
 
         # Compute metrics for each sample
         print("Computing metrics for each sample...")
-        metric_results = [self.compute_metrics(sample) for sample in self.data]
+        metric_results = [self.compute_metrics(row) for _, row in self.data.iterrows()]
 
         # Convert results to DataFrame
         df = pd.DataFrame(metric_results)
@@ -106,11 +100,8 @@ class EvaluationMetrics:
 
 
 if __name__ == "__main__":
-    # Ensure the output directory exists
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
     # Initialize the evaluator
-    evaluator = EvaluationMetrics(OUTPUT_FILE, OUTPUT_DIR)
+    evaluator = EvaluationMetrics(OUTPUT_FILE)
 
     # Run the evaluation
     evaluator.evaluate()
