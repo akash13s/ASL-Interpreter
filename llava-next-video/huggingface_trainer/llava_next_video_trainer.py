@@ -7,7 +7,7 @@ import av
 import numpy as np
 import pandas as pd
 import torch
-from peft import get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
+from peft import PeftModel, get_peft_model, LoraConfig, TaskType, prepare_model_for_kbit_training
 from torch.utils.data import Dataset
 from torchvision import transforms
 from transformers import (
@@ -448,21 +448,22 @@ def main():
 
     logger.info("Model loaded successfully.")
 
-    # # Prepare model for k-bit training and configure LoRA
-    # model = prepare_model_for_kbit_training(model)
-    # peft_config = LoraConfig(
-    #     r=LORA_R,
-    #     lora_alpha=LORA_ALPHA,
-    #     target_modules=LORA_TARGET_MODULES,
-    #     lora_dropout=LORA_DROPOUT,
-    #     bias="none",
-    #     task_type=TaskType.CAUSAL_LM
-    # )
-    # model = get_peft_model(model, peft_config)
-
-    logger.info(model.print_trainable_parameters())
-
-    logger.info("LoRA configuration complete.")
+    # Prepare model for k-bit training and configure LoRA
+    # Check if the model already has a PEFT configuration
+    if not isinstance(model, PeftModel):
+        model = prepare_model_for_kbit_training(model)
+        peft_config = LoraConfig(
+            r=LORA_R,
+            lora_alpha=LORA_ALPHA,
+            target_modules=LORA_TARGET_MODULES,
+            lora_dropout=LORA_DROPOUT,
+            bias="none",
+            task_type=TaskType.CAUSAL_LM
+        )
+        model = get_peft_model(model, peft_config)
+        logger.info("LoRA configuration complete.")
+    else:
+        logger.info("PEFT configuration already found. Skipping reapplication.")
 
     # Configure training arguments
     training_args = TrainingArguments(
