@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import torch
 from datasets import Dataset
+from tqdm import tqdm
 
 from components.model import get_model
 from components.peft import load_peft_model
@@ -52,4 +53,20 @@ dataset = (dataset
 # Set up device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-dataset = dataset.map(lambda row: {"generated": generate_text(model, processor, row, device)})
+num_shards = 16
+processed_shards = []
+
+for shard_id in tqdm(range(num_shards), desc="Shards Progress"):
+    sharded_dataset = dataset.shard(num_shards=num_shards, index=0)
+    processed_shard = sharded_dataset.map(
+        lambda row: {"generated": generate_text(model, processor, row, device)},
+        desc=f"Processing Shard {0}",
+        load_from_cache_file=False
+    )
+    processed_shard = processed_shard.remove_columns(["input_ids", "attention_mask", "pixel_values_videos"])
+    processed_shards.append(processed_shard)
+
+final_dataset = Dataset.from_dict({
+    key: sum([shard[key] for shard in processed_shards], [])
+    for key in processed_shards[0].column_names
+})
