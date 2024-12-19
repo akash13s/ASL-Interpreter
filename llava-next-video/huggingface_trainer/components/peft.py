@@ -4,7 +4,8 @@ from peft import prepare_model_for_kbit_training, LoraConfig, TaskType, get_peft
 def load_peft_model(model, lora_params):
     # Prepare model for k-bit training and configure LoRA
     model = prepare_model_for_kbit_training(model)
-    r, alpha, dropout, target_modules = lora_params
+    r, alpha = lora_params['r'], lora_params['alpha']
+    dropout, target_modules = lora_params['dropout'], lora_params['target_modules']
     peft_config = LoraConfig(
         r=r,
         lora_alpha=alpha,
