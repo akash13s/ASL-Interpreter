@@ -1,6 +1,6 @@
 # ASL-Interpreter
 
-We want to build a model to interpret continuous American Sign Language (ASL) signing into English text. For this use case, we conducted experiments conducted for fine-tuning large language vision models, specifically:
+We want to build a model to interpret continuous American Sign Language (ASL) signing into English text. For this use case, we conducted experiments for fine-tuning large language vision models, specifically:
 
 1. **LLaVA-NeXT-Video**
 2. **Video-LLaVA**
